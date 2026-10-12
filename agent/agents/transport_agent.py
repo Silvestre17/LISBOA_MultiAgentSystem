@@ -2269,8 +2269,8 @@ _ANOTHER_DAY_PHRASE_RE = re.compile(
 )
 # Lines that only hold for leaving now: next departures, live positions, waits.
 _LIVE_DEPARTURE_LINE_RE = re.compile(
-    r"^[ \t]*(?:[-*][ \t]+)?(?:[^\w\s*]+[ \t]*)?(?:\*\*)?(?:Pr[oó]ximas partidas|Next departures|Tempo real|Real[- ]time|"
-    r"Pr[oó]ximo metro|Next metro|Espera(?: estimada)?|Waiting time|Wait)(?:\*\*)?\s*:.*$\n?"
+    r"^[ \t]*(?:[-*][ \t]+)?(?:[^\w\s*]+[ \t]*)?(?:\*\*)?(?:Pr[oó]ximas (?:\d+ )?partidas|Next (?:\d+ )?departures|Tempo real|Real[- ]time|"
+    r"Pr[oó]ximo (?:metro|comboio)(?: hoje)?|Next (?:metro|train)(?: today)?|Espera(?: estimada)?|Waiting time|Wait)(?:\*\*)?\s*(?::.*)?$\n?"
     r"|^[ \t]*📡.*$\n?",
     re.IGNORECASE | re.MULTILINE,
 )
@@ -2280,8 +2280,9 @@ def _drop_live_departures_for_another_day(response: str, user_message: str, lang
     """Remove live departures from an answer about a trip on another day.
 
     Next departures and waiting times describe leaving now; for "tomorrow" or
-    "on Saturday" they would read as that day's timetable. The route itself
-    (lines, stops, transfers, in-vehicle time) stays.
+    "on Saturday" they would read as that day's timetable. Remove complete CP
+    departure sections and today's date/status/count, including clock times in
+    the direct answer. The route (lines, stops, transfers, in-vehicle time) stays.
 
     Args:
         response: Finalized transport answer.
@@ -2301,7 +2302,57 @@ def _drop_live_departures_for_another_day(response: str, user_message: str, lang
     today = lisbon_now().date()
     if plan_date(PlanBrief(day=match.group(0)), today) == today:
         return response
-    cleaned = _LIVE_DEPARTURE_LINE_RE.sub("", response)
+    is_cp_response = bool(
+        re.search(
+            r"\b(?:cp|comboio|suburban/aml|linha de (?:sintra|cascais|azambuja|sado))\b",
+            _normalize_token(response),
+        )
+    )
+    line_match = re.search(
+        r"\*\*(?:Linha|Linhas|Line|Lines):\*\*\s*([^\n]+)", response, flags=re.IGNORECASE
+    )
+    kept_lines: list[str] = []
+    in_departure_block = False
+    for raw_line in response.splitlines():
+        label = _normalize_token(re.sub(r"[^\w\s:/+-]", "", raw_line)).strip().lstrip("- ")
+        if re.fullmatch(r"(?:proximas (?:\d+ )?partidas|next (?:\d+ )?departures)\s*:?", label):
+            in_departure_block = True
+            continue
+        if in_departure_block:
+            if not raw_line.strip() or re.match(
+                r"^[ \t]*(?:[-*][ \t]+)?(?:[^\w\s*]+[ \t]*)?(?:\*\*)?\d{1,2}:\d{2}\b|"
+                r"^[ \t]*[-*][ \t]+\.\.\.", raw_line
+            ):
+                continue
+            in_departure_block = False
+        if _LIVE_DEPARTURE_LINE_RE.match(raw_line):
+            continue
+        if is_cp_response and re.match(
+            r"(?:data|date|estado|status|partidas restantes hoje|departures left today)\s*:", label
+        ):
+            continue
+        if is_cp_response and line_match and re.search(r"\*\*(?:Resposta direta|Direct answer):\*\*", raw_line):
+            if (
+                re.search(r"\b(?:proximo|next|hoje|today|tempo real|live)\b|\d{1,2}:\d{2}", label)
+                and not re.search(r"nao consigo|nao foi possivel|cannot|can't|could not", label)
+            ):
+                if language == "pt":
+                    direct_answer = f"segue de **CP suburbano/AML** pela **{line_match.group(1).strip()}**."
+                    raw_line = f"✅ **Resposta direta:** {direct_answer}"
+                else:
+                    direct_answer = f"take a **CP suburban/AML** train on **{line_match.group(1).strip()}**."
+                    raw_line = f"✅ **Direct answer:** {direct_answer}"
+        elif re.search(r"\*\*(?:Resposta direta|Direct answer):\*\*", raw_line):
+            raw_line = re.sub(
+                r"[;,]\s*(?:o pr[oó]ximo sai|pr[oó]xima partida [aà]s|next departure at|"
+                r"the next (?:bus |tram |one )?(?:leaves|departs)).*$",
+                ".", raw_line, flags=re.IGNORECASE,
+            )
+        kept_lines.append(raw_line)
+    cleaned = "\n".join(kept_lines)
+    # Dropping a departure section can leave two adjacent section separators.
+    cleaned = re.sub(r"\n\s*---\s*\n\s*---\s*\n", "\n\n---\n\n", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     if cleaned == response:
         return response
     note = (
@@ -2309,6 +2360,8 @@ def _drop_live_departures_for_another_day(response: str, user_message: str, lang
         if language == "pt"
         else "ℹ️ Live departures only apply to leaving now; for the day of the trip, check the timetable with the operator."
     )
+    if note in cleaned:
+        return cleaned.strip()
     source = re.search(r"(?m)^📌\s+\*\*(?:Fonte|Source):\*\*.*$", cleaned)
     if source:
         return f"{cleaned[: source.start()].rstrip()}\n\n{note}\n\n{cleaned[source.start():]}".strip()
@@ -3818,10 +3871,18 @@ def _summarize_recommended_carris_option(
         first_block,
         flags=re.IGNORECASE,
     )
-    # "Real time: upcoming departures confirmed" only when times were listed,
-    # never under "no departures were confirmed today".
-    has_live_departures = bool(
+    # A listed GTFS clock time does not prove a real-time arrival update.
+    has_departures = bool(
         departures_match and re.search(r"\d{1,2}:\d{2}|\d+\s*min", departures_match.group("departures"))
+    )
+    has_live_departures = bool(
+        has_departures and re.search(
+            r"tempo real|real[- ]time|\(live\)|\d+\s*min(?:s)?\s+(?:de atraso|delay|late)",
+            departures_match.group("departures"), flags=re.IGNORECASE,
+        )
+        and not re.search(
+            r"n[aã]o|\bno\b|not confirmed|unavailable", departures_match.group("departures"), flags=re.IGNORECASE,
+        )
     )
     travel_match = re.search(
         r"\*\*(?:Tempo estimado|Tempo em veículo|Estimated travel time|Vehicle time):\*\*\s*(?P<travel>[^\n]+)",
@@ -3855,7 +3916,9 @@ def _summarize_recommended_carris_option(
                 "não trato estes horários como partidas em tempo real."
             )
         elif has_live_departures:
-            summary += "\n- 📡 **Tempo real:** próximas partidas confirmadas; sem alerta operacional específico."
+            summary += "\n- 📡 **Tempo real:** partidas com atualização em tempo real."
+        elif has_departures:
+            summary += "\n- ℹ️ **Partidas:** horários programados; chegada em tempo real não confirmada."
         return summary
 
     summary = f"- ✅ **Best confirmed option:** take **{route}** ({direction})"
@@ -3878,7 +3941,9 @@ def _summarize_recommended_carris_option(
             "these are not being presented as real-time departures."
         )
     elif has_live_departures:
-        summary += "\n- 📡 **Real-time:** upcoming departures confirmed; no specific operational alert reported."
+        summary += "\n- 📡 **Real-time:** departures with a real-time update."
+    elif has_departures:
+        summary += "\n- ℹ️ **Departures:** scheduled times; real-time arrival not confirmed."
     return summary
 
 

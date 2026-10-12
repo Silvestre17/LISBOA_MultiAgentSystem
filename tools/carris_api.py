@@ -66,7 +66,7 @@ except ImportError:
     from utils import LISBON_TZ, haversine_distance, lisbon_now
 
 try:
-    from tools.location_resolver import build_location_ambiguity_preamble, get_location_display_name
+    from tools.location_resolver import build_location_ambiguity_preamble, classify_coordinate_scope, get_location_display_name
     from tools.runtime_paths import resolve_runtime_data_dir, seed_runtime_data_dir
     from tools.transport_release_assets import ensure_runtime_data_from_release
 except ModuleNotFoundError as exc:
@@ -74,7 +74,7 @@ except ModuleNotFoundError as exc:
     # a missing dependency must surface with its own name, not as location_resolver.
     if exc.name != "tools":
         raise
-    from location_resolver import build_location_ambiguity_preamble, get_location_display_name
+    from location_resolver import build_location_ambiguity_preamble, classify_coordinate_scope, get_location_display_name
     from runtime_paths import resolve_runtime_data_dir, seed_runtime_data_dir
     from transport_release_assets import ensure_runtime_data_from_release
 
@@ -157,6 +157,8 @@ def geocode_location(
     """
     coordinates = _parse_coordinate_text(place_name)
     if coordinates:
+        if classify_coordinate_scope(*coordinates) == "outside_scope":
+            return None, None, None
         return coordinates[0], coordinates[1], place_name
     try:
         from tools.location_resolver import resolve_location_query
@@ -282,18 +284,27 @@ def _truncate_display_text(text: str, max_length: int = 42) -> str:
 def _resolve_carris_headsign(
     trip_headsign: Optional[str],
     route_long_name: Optional[str],
-    direction_id: Optional[int],
+    terminal_stop_name: Optional[str],
 ) -> str:
-    """Resolves the best user-facing destination label for a Carris trip."""
+    """Resolve a trip destination from its headsign or verified final stop.
+
+    Args:
+        trip_headsign: Destination published for this specific trip.
+        route_long_name: Route label, which may describe both directions.
+        terminal_stop_name: Final stop in this trip's ordered GTFS stop list.
+
+    Returns:
+        A grounded destination label, or the complete route label if unknown.
+    """
     cleaned_trip_headsign = _clean_carris_headsign(trip_headsign)
     cleaned_route_long_name = _clean_carris_headsign(route_long_name)
 
-    if cleaned_trip_headsign and " - " not in cleaned_trip_headsign:
+    if cleaned_trip_headsign and cleaned_trip_headsign != cleaned_route_long_name:
         return cleaned_trip_headsign
 
-    parts = [part.strip() for part in cleaned_route_long_name.split(" - ") if part.strip()]
-    if len(parts) == 2 and direction_id in {0, 1}:
-        return parts[1] if direction_id == 0 else parts[0]
+    cleaned_terminal = _clean_carris_headsign(terminal_stop_name)
+    if cleaned_terminal:
+        return cleaned_terminal
 
     return cleaned_trip_headsign or cleaned_route_long_name or "Unknown"
 
@@ -1198,7 +1209,12 @@ def _get_trip_info_by_id(conn: sqlite3.Connection, trip_id: str) -> Optional[Dic
     cursor.execute(
         """
         SELECT t.trip_id, t.trip_headsign, t.direction_id, t.route_id,
-               r.route_short_name, r.route_long_name
+               r.route_short_name, r.route_long_name,
+               (SELECT last_stop.stop_name
+                FROM stop_times last_time
+                JOIN stops last_stop ON last_stop.stop_id = last_time.stop_id
+                WHERE last_time.trip_id = t.trip_id
+                ORDER BY last_time.stop_sequence DESC LIMIT 1) AS terminal_stop_name
         FROM trips t
         JOIN routes r ON t.route_id = r.route_id
         WHERE t.trip_id = ?
@@ -1412,7 +1428,7 @@ def enrich_vehicle_with_static_data(vehicle: Dict, conn: sqlite3.Connection) -> 
             enriched["trip_headsign"] = _resolve_carris_headsign(
                 trip_info.get("trip_headsign"),
                 trip_info.get("route_long_name"),
-                trip_info.get("direction_id"),
+                trip_info.get("terminal_stop_name"),
             )
 
     # Final fallback: if trip_headsign is still None, use route_long_name
@@ -1637,8 +1653,12 @@ def _get_directional_departures_for_route(
                s.stop_name AS origin_stop_name,
                st.departure_time,
                t.trip_headsign,
-               t.direction_id,
                r.route_long_name,
+               (SELECT last_stop.stop_name
+                FROM stop_times last_time
+                JOIN stops last_stop ON last_stop.stop_id = last_time.stop_id
+                WHERE last_time.trip_id = t.trip_id
+                ORDER BY last_time.stop_sequence DESC LIMIT 1) AS terminal_stop_name,
                MIN(st_d.arrival_time) AS target_arrival_time
         FROM stop_times st
         JOIN trips t ON st.trip_id = t.trip_id
@@ -1651,7 +1671,7 @@ def _get_directional_departures_for_route(
           AND r.route_short_name = ?
           AND t.service_id IN ({ph_s})
           AND st.departure_time >= ?
-        GROUP BY st.trip_id, st.stop_id, s.stop_name, st.departure_time, t.trip_headsign, t.direction_id, r.route_long_name
+        GROUP BY st.trip_id, st.stop_id, s.stop_name, st.departure_time, t.trip_headsign, r.route_long_name
         ORDER BY st.departure_time
         LIMIT ?
         """,
@@ -1663,7 +1683,7 @@ def _get_directional_departures_for_route(
         headsign = _resolve_carris_headsign(
             row["trip_headsign"],
             row["route_long_name"],
-            row["direction_id"],
+            row["terminal_stop_name"],
         )
         scheduled_departure = row["departure_time"][:5]
         estimated_departure = scheduled_departure
@@ -2314,6 +2334,10 @@ def carris_find_routes_between(
     Returns:
         Route options with real-time waiting times.
     """
+    for endpoint in (origin, destination):
+        coordinates = _parse_coordinate_text(endpoint)
+        if coordinates and classify_coordinate_scope(*coordinates) == "outside_scope":
+            return "Carris Urban serves Lisbon; the given coordinates are outside the supported Lisbon/AML area."
     conn = _get_db_connection()
     if not conn:
         return "Carris database unavailable."
