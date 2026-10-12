@@ -1,0 +1,43 @@
+{
+  "title": "LISBOA (Lisbon Itinerary System Based On AI): source code and evaluation artifacts",
+  "upload_type": "software",
+  "description": "<p>LISBOA is a multi-agent assistant for context-aware tourism and urban mobility guidance in Lisbon. A supervisor routes each request to specialized worker agents (weather, transport, research), an optional itinerary planner, and a quality-assurance stage. The agents use 45 grounded tools connected to nine Lisbon data sources, combining retrieval-augmented generation, geospatial open-data retrieval, and live weather and transport integrations.</p><p>This record archives the source code, the evaluation corpus, and the evaluation results (worker benchmark, paired ablation, and statistics) reported in the article published in Results in Engineering (https://doi.org/10.1016/j.rineng.2026.113369) and in the MSc thesis at NOVA Information Management School (NOVA IMS), Universidade NOVA de Lisboa.</p>",
+  "creators": [
+    {
+      "name": "Silvestre, André",
+      "affiliation": "NOVA Information Management School (NOVA IMS), Universidade NOVA de Lisboa",
+      "orcid": "0009-0005-1623-018X"
+    },
+    {
+      "name": "Jardim, Bruno",
+      "affiliation": "NOVA Information Management School (NOVA IMS), Universidade NOVA de Lisboa",
+      "orcid": "0000-0002-6232-2115"
+    },
+    {
+      "name": "de Castro Neto, Miguel",
+      "affiliation": "NOVA Information Management School (NOVA IMS), Universidade NOVA de Lisboa",
+      "orcid": "0000-0002-7265-3890"
+    }
+  ],
+  "keywords": [
+    "Artificial intelligence",
+    "Agentic AI",
+    "Multi-agent systems",
+    "Large language models",
+    "Retrieval-augmented generation",
+    "LLM-as-judge evaluation",
+    "Urban mobility",
+    "Tourism",
+    "Lisbon"
+  ],
+  "license": "MIT",
+  "language": "eng",
+  "related_identifiers": [
+    {
+      "identifier": "10.1016/j.rineng.2026.113369",
+      "relation": "isSupplementTo",
+      "resource_type": "publication-article",
+      "scheme": "doi"
+    }
+  ]
+}

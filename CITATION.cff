@@ -1,0 +1,43 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the article below."
+type: software
+title: "LISBOA (Lisbon Itinerary System Based On AI): source code and evaluation artifacts"
+version: 1.0.0
+license: MIT
+repository-code: "https://github.com/Silvestre17/LISBOA_MultiAgentSystem"
+url: "https://andresilvestre17-lisboa.hf.space/"
+authors:
+  - family-names: Silvestre
+    given-names: André
+    affiliation: "NOVA Information Management School (NOVA IMS), Universidade NOVA de Lisboa"
+    orcid: "https://orcid.org/0009-0005-1623-018X"
+  - family-names: Jardim
+    given-names: Bruno
+    affiliation: "NOVA Information Management School (NOVA IMS), Universidade NOVA de Lisboa"
+    orcid: "https://orcid.org/0000-0002-6232-2115"
+  - family-names: de Castro Neto
+    given-names: Miguel
+    affiliation: "NOVA Information Management School (NOVA IMS), Universidade NOVA de Lisboa"
+    orcid: "https://orcid.org/0000-0002-7265-3890"
+keywords:
+  - agentic AI
+  - multi-agent systems
+  - large language models
+  - retrieval-augmented generation
+  - urban mobility
+  - tourism
+  - Lisbon
+preferred-citation:
+  type: article
+  title: "A multi-agent approach for context-aware tourism and urban mobility guidance"
+  authors:
+    - family-names: Silvestre
+      given-names: André
+    - family-names: Jardim
+      given-names: Bruno
+    - family-names: de Castro Neto
+      given-names: Miguel
+  journal: "Results in Engineering"
+  year: 2026
+  start: 113369
+  doi: "10.1016/j.rineng.2026.113369"
