@@ -595,8 +595,7 @@ class WeatherAgent(BaseAgent):
     def _warning_tool_result_status(tool_result: str) -> str:
         """Distinguish confirmed warnings, a clear status, and unavailable evidence."""
         if re.search(
-            r"failed to fetch weather warnings|could not fetch weather warnings|"
-            r"unexpected response format.*warnings|warning status.*unavailable",
+            r"failed to fetch weather warnings|could not fetch weather warnings",
             tool_result or "", re.IGNORECASE,
         ):
             return "unavailable"
@@ -1282,8 +1281,15 @@ class WeatherAgent(BaseAgent):
                 "Published weather warnings": "Avisos meteorológicos publicados",
                 "warnings are published for upcoming periods.": "existem avisos publicados para períodos futuros.",
             }
-            for original, translated in replacements.items():
-                body = body.replace(original, translated)
+        else:
+            replacements = {
+                "❌ Failed to fetch weather warnings from IPMA.": "⚠️ Could not obtain the IPMA weather warnings; their current status is not confirmed.",
+                "⚠️ Could not fetch weather warnings.": "⚠️ Could not obtain the IPMA weather warnings; their current status is not confirmed.",
+                "❌ Failed to fetch weather forecast from IPMA.": "⚠️ Could not obtain the IPMA forecast.",
+                "❌ Could not fetch today's forecast.": "⚠️ Could not obtain today's IPMA forecast.",
+            }
+        for original, translated in replacements.items():
+            body = body.replace(original, translated)
         title = cls._weather_title_for_query(
             user_message,
             language,
@@ -1421,9 +1427,9 @@ class WeatherAgent(BaseAgent):
         asks_warnings = any(term in normalized for term in _WARNING_QUERY_TERMS)
         if asks_warnings and cls._warning_tool_result_status(tool_text) == "unavailable":
             return (
-                "⚠️ Não foi possível confirmar se existem **avisos meteorológicos ativos** para Lisboa."
+                "⚠️ **Resposta direta:** não foi possível confirmar se existem **avisos meteorológicos ativos** para Lisboa."
                 if is_pt else
-                "⚠️ I could not confirm whether **weather warnings are active** for Lisbon."
+                "⚠️ **Direct answer:** I could not confirm whether **weather warnings are active** for Lisbon."
             )
         forecast_unavailable = bool(re.search(
             r"failed to fetch weather forecast|could not fetch today's forecast|"
@@ -1431,9 +1437,9 @@ class WeatherAgent(BaseAgent):
         ))
         if not asks_warnings and forecast_unavailable:
             return (
-                "⚠️ Não foi possível obter a previsão do IPMA para responder à tua pergunta."
+                "⚠️ **Resposta direta:** não foi possível obter a previsão do IPMA para responder à tua pergunta."
                 if is_pt else
-                "⚠️ I could not obtain the IPMA forecast needed to answer your question."
+                "⚠️ **Direct answer:** I could not obtain the IPMA forecast needed to answer your question."
             )
         no_warnings = bool(
             re.search(
@@ -1448,7 +1454,6 @@ class WeatherAgent(BaseAgent):
                 tool_text,
                 forecast_window,
                 is_pt,
-                no_warnings=no_warnings,
             )
             if "weekend" in normalized or "fim de semana" in normalized:
                 coverage = cls._weekend_coverage_sentence(forecast_window, is_pt)
@@ -1566,7 +1571,8 @@ class WeatherAgent(BaseAgent):
                 asks_umbrella
                 or re.search(r"\b(?:rain|raining|chuva|chover|precipitacao|precipitation)\b", normalized)
             )
-            rain_answer = f"{cls._rain_direct_answer(rain, is_pt)}\n\n" if rain and asks_rain_context else ""
+            # Rain evidence follows the direct answer instead of preceding it.
+            rain_answer = f"\n\n{cls._rain_direct_answer(rain, is_pt)}" if rain and asks_rain_context else ""
             explicitly_requested_items = sum([asks_sun_protection, asks_umbrella, asks_jacket])
             if explicitly_requested_items > 1:
                 probability = float(rain.get("probability", 0) or 0) if rain else 0.0
@@ -1627,7 +1633,7 @@ class WeatherAgent(BaseAgent):
                     if is_pt
                     else "✅ **Direct answer:** yes, adjust what you bring to the forecast conditions for the items you asked about."
                 )
-                return f"{rain_answer}{direct_line}\n\n" + "\n".join(advice_lines)
+                return f"{direct_line}{rain_answer}\n\n" + "\n".join(advice_lines)
             if asks_sun_protection:
                 warm_note = bool(max_temp is not None and max_temp >= 24)
                 if is_pt:
@@ -1649,13 +1655,13 @@ class WeatherAgent(BaseAgent):
                 probability = float(rain.get("probability", 0) or 0) if rain else 0.0
                 if is_pt:
                     if probability < 25:
-                        return f"{rain_answer}✅ **Resposta direta:** não parece necessário levares guarda-chuva; a chuva está pouco provável."
-                    return f"{rain_answer}✅ **Resposta direta:** leva um **guarda-chuva compacto** ou impermeável, porque há possibilidade de chuva."
+                        return f"✅ **Resposta direta:** não parece necessário levares guarda-chuva; a chuva está pouco provável.{rain_answer}"
+                    return f"✅ **Resposta direta:** leva um **guarda-chuva compacto** ou impermeável, porque há possibilidade de chuva.{rain_answer}"
                 if probability < 25:
-                    return f"{rain_answer}✅ **Direct answer:** you probably do not need an umbrella; rain looks unlikely."
-                return f"{rain_answer}✅ **Direct answer:** bring a **compact umbrella** or rain shell because rain is possible."
+                    return f"✅ **Direct answer:** you probably do not need an umbrella; rain looks unlikely.{rain_answer}"
+                return f"✅ **Direct answer:** bring a **compact umbrella** or rain shell because rain is possible.{rain_answer}"
             if asks_jacket:
-                return f"{rain_answer}{cls._jacket_answer(minimum, rain, is_pt)}"
+                return f"{cls._jacket_answer(minimum, rain, is_pt)}{rain_answer}"
             # A wind layer is advice for a strong wind, or a moderate one on a cool day.
             wind_strength = cls._normalize_weather_query(wind or "")
             needs_wind_layer = bool(
@@ -1683,7 +1689,7 @@ class WeatherAgent(BaseAgent):
                     suitability = "Para esperar numa fila ao ar livre"
                 else:
                     suitability = "Parece adequado para caminhar" if any(term in normalized for term in ["adequado", "bom para", "evitar", "passeio"]) else "Para caminhar ao ar livre"
-                return f"{rain_answer}✅ **Resposta direta:** 👟 {suitability}: {', '.join(advice_parts)}{forecast_note}."
+                return f"✅ **Resposta direta:** 👟 {suitability}: {', '.join(advice_parts)}{forecast_note}.{rain_answer}"
             advice_parts = []
             if min_temp is not None and min_temp <= 17:
                 advice_parts.append("wear a **light jacket**" + ("" if max_temp is not None and max_temp < 20 else " for the start and end of the day"))
@@ -1703,7 +1709,7 @@ class WeatherAgent(BaseAgent):
                 suitability = "For queueing outside"
             else:
                 suitability = "It looks suitable for a walk" if any(term in normalized for term in ["suitable", "good for", "avoid", "riverside"]) else "For walking outdoors"
-            return f"{rain_answer}✅ **Direct answer:** 👟 {suitability}: {', '.join(advice_parts)}{forecast_note}."
+            return f"✅ **Direct answer:** 👟 {suitability}: {', '.join(advice_parts)}{forecast_note}.{rain_answer}"
 
         if "wind" in normalized or "vento" in normalized:
             wind = cls._extract_wind_summary(tool_text)
@@ -1966,8 +1972,6 @@ class WeatherAgent(BaseAgent):
         tool_text: str,
         forecast_window: Optional[dict[str, Any]],
         is_pt: bool,
-        *,
-        no_warnings: bool,
     ) -> str:
         """Answer "any warnings for <day/weekend>?" against the warning periods.
 

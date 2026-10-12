@@ -634,6 +634,23 @@ def pre_warm_transport_networks() -> Dict[str, Any]:
     }
 
 
+def pre_warm_weather() -> None:
+    """Fetch the IPMA warnings once to report reachability and warm the cache.
+
+    Weather is not required for startup, so a failure is reported, not fatal.
+    """
+    from tools.ipma_client import IPMA_CLIENT, WARNINGS_URL
+
+    route = f"relay {IPMA_CLIENT.base_url}" if IPMA_CLIENT.uses_relay else "direct"
+    result = IPMA_CLIENT.fetch(WARNINGS_URL)
+    if result.data is not None:
+        _startup_log(f"✅ IPMA weather layer: reachable ({route}, {len(result.data)} warning records)")
+        return
+    _startup_log(f"⚠️ IPMA weather layer: unreachable ({route}, {result.error})")
+    if not IPMA_CLIENT.uses_relay:
+        _startup_log("   ℹ️ If this host's network is blocked by IPMA, set IPMA_BASE_URL to the relay.")
+
+
 def run_startup_preload(language: str = "pt", force_refresh: bool = False) -> Dict[str, Any]:
     """Load one-time shared resources needed by the multi-agent runtime.
 
@@ -657,6 +674,7 @@ def run_startup_preload(language: str = "pt", force_refresh: bool = False) -> Di
         transport_preload = pre_warm_transport_networks()
         transport_ok = bool(transport_preload.get("ok", False))
         transport_status = str(transport_preload.get("summary") or "")
+        pre_warm_weather()
         kb_ok = pre_warm_vector_store()
         startup_status = {
             "transport_ok": transport_ok,

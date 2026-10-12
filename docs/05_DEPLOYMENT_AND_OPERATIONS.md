@@ -62,6 +62,7 @@ Certificate verification is enabled by default. When the Metro gateway serves an
 | `LISBOA_REUSE_LOCAL_TRANSPORT_DATA` | Local smoke-test acceleration; ignored on Hugging Face Spaces |
 | `STREAMLIT_RESOURCE_CACHE_TTL_SECONDS` | Optional refresh interval for release-backed resources without a restart |
 | `LISBOA_STARTUP_PRELOAD_ENABLED`, `LISBOA_STARTUP_PRELOAD_REQUIRED`, `LISBOA_STARTUP_PRELOAD_LANGUAGE` | Startup preload in the Docker entry point |
+| `IPMA_BASE_URL` | Host that serves the IPMA `/open-data/` paths; unset means `https://api.ipma.pt`. Set it to the [IPMA relay](#ipma-relay) on hosts whose network IPMA does not accept |
 
 ### Observability and Logging
 
@@ -129,6 +130,32 @@ The container starts `scripts/hf_space_entrypoint.py`, which runs the startup pr
 - It requires an `HF_TOKEN` secret in the GitHub repository.
 - The Space is created as a private Docker Space on the first deployment.
 - The bundle includes the pricing metadata and the VisitLisboa and Lisboa Aberta source files, but not the vector database or the transport SQLite files. The Space downloads those from GitHub Releases at startup, into writable runtime storage.
+
+### IPMA Relay
+
+IPMA's network (FCT/RCTS, AS1930) does not accept TCP connections from AWS, where Hugging Face Spaces run: DNS resolves, but the connection times out before TLS. Other networks, including Cloudflare's, reach it normally. The Space therefore reads IPMA through a read-only relay on Cloudflare Pages, which forwards only `GET /open-data/...` requests to `https://api.ipma.pt` and caches each response for two minutes.
+
+The relay runs on `pages.dev`, not `workers.dev`: the Space reaches `pages.dev`, but its connections to `workers.dev` time out.
+
+```js
+// _worker.js (Cloudflare Pages, advanced mode): read-only relay for IPMA open data.
+export default {
+  async fetch(request) {
+    const { pathname } = new URL(request.url);
+    if (request.method !== "GET" || !pathname.startsWith("/open-data/")) {
+      return new Response("Not found", { status: 404 });
+    }
+    return fetch(`https://api.ipma.pt${pathname}`, { cf: { cacheTtl: 120, cacheEverything: true } });
+  },
+};
+```
+
+1. Save the code above as `_worker.js` in an otherwise empty folder.
+2. In Cloudflare, open Workers & Pages → Create application → Continue to Pages → Upload assets, name the project `ipma-relay`, and upload the folder.
+3. Add the project URL (`https://ipma-relay.pages.dev`) as the `IPMA_BASE_URL` variable of the Space and restart it.
+4. The startup log must show `✅ IPMA weather layer: reachable (relay ...)`.
+
+Local runs leave `IPMA_BASE_URL` unset and call IPMA directly.
 
 ## 🧰 Vector-Store Operations
 
@@ -268,6 +295,10 @@ The expected sequence is:
 
 > [!WARNING]
 > If a deployed environment still fails after step 2, keep `METRO_SSL_VERIFY=true` and inspect the outbound network policy or any TLS interception.
+
+### IPMA Weather Times Out on a Hosted Deployment
+
+`IPMA ... failed after 3.00s: ConnectTimeout` with `⚠️ IPMA weather layer: unreachable (direct, ...)` at startup means the host cannot open a connection to IPMA. Configure the [IPMA relay](#ipma-relay). The answers then state that the weather data could not be obtained; they never claim that there are, or are not, active warnings.
 
 ### A Live Integration Seems Broken
 

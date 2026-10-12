@@ -1086,7 +1086,7 @@ def _is_pure_weather_limitation(text: str) -> bool:
         re.search(
             r"\b(?:so tenho|only have|nao consigo|can't|cannot|fora do horizonte|outside.*horizon|"
             r"sem inventar dados|without inventing data|cobertura meteorologica disponivel|available weather coverage|"
-            r"nao foi possivel|could not|failed to fetch|warning status.*unavailable)\b",
+            r"nao foi possivel|could not|failed to fetch)\b",
             visible,
         )
     )
@@ -4794,6 +4794,7 @@ def _has_material_weather_source_evidence(text: str) -> bool:
     fact_marker = bool(
         re.search(
             r"(?<![%\w])\d+(?:[.,]\d+)?\s*°\s*c\b"
+            r"|\b(?:no active weather warnings|sem avisos meteorologicos|nao ha avisos meteorologicos)\b"
             r"|\b(?:warnings?|avisos?)[^\n]*(?:no active|sem avisos|active|ativos?)"
             r"|\b(?:rain|chuva|precipita)[^\n:]{0,60}:\s*(?:\d|sem|no|muito|very|likely|prov[a-z]*|fraca|weak)"
             r"|\b(?:wind|vento)[^\n:]{0,60}:\s*[a-z]"
@@ -5062,7 +5063,7 @@ def _is_scope_limitation_response(text: str) -> bool:
     """Return whether the answer is only a capability/scope limitation."""
     normalized = _strip_accents_compat(text or "").lower()
     return bool(
-        re.search(r"\bfora do ambito(?: de mobilidade)? do lisboa\b", normalized)
+        re.search(r"\bfora do ambito(?: de mobilidade| geografico)? do lisboa\b", normalized)
         or re.search(r"\brede fora do ambito confirmado\b", normalized)
         or re.search(r"\bmobilidade fora do ambito confirmado\b", normalized)
         or re.search(r"\bcomboios cp fora do ambito\b", normalized)
@@ -5079,7 +5080,7 @@ def _is_scope_limitation_response(text: str) -> bool:
         or re.search(r"\bnao consigo fundamentar com seguranca um plano completo\b", normalized)
         or re.search(r"\bbounded lisbon planning framework\b", normalized)
         or re.search(r"\bcannot safely ground a full plan\b", normalized)
-        or re.search(r"\boutside lisboa'?s (?:mobility )?scope\b", normalized)
+        or re.search(r"\boutside lisboa'?s (?:mobility |geographic )?scope\b", normalized)
         or re.search(r"\boutside (?:the )?confirmed scope\b", normalized)
         or re.search(r"\bmobility outside confirmed scope\b", normalized)
         or re.search(r"\bcp trains outside aml\b", normalized)
@@ -20391,7 +20392,10 @@ def _ensure_weather_horizon_limit_date(text: str, language: str = "en") -> str:
     ):
         return text
 
-    limit = datetime.now() + timedelta(days=5)
+    from tools.utils import lisbon_now
+
+    # The IPMA daily forecast covers today plus the next four Lisbon dates.
+    limit = lisbon_now() + timedelta(days=4)
     months_pt = (
         "janeiro", "fevereiro", "março", "abril", "maio", "junho",
         "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",

@@ -191,13 +191,28 @@ def _format_warning_period(start_time: str, end_time: str) -> str:
         return f"{safe_start} → {safe_end}"
 
 
+def _warning_interval(warning: Dict[str, Any]) -> Optional[tuple[datetime, datetime]]:
+    """Return a warning's interval as aware datetimes (UTC when unqualified)."""
+    try:
+        start, end = (
+            datetime.fromisoformat(str(warning.get(key, "")).replace("Z", "+00:00"))
+            for key in ("startTime", "endTime")
+        )
+    except ValueError:
+        return None
+    return tuple(value if value.tzinfo else value.replace(tzinfo=timezone.utc) for value in (start, end))
+
+
 def _warning_is_current(warning: Dict[str, Any]) -> bool:
-    """Check a validated warning's UTC interval against the current instant."""
-    start = datetime.fromisoformat(warning["startTime"].replace("Z", "+00:00"))
-    end = datetime.fromisoformat(warning["endTime"].replace("Z", "+00:00"))
-    start = start if start.tzinfo else start.replace(tzinfo=timezone.utc)
-    end = end if end.tzinfo else end.replace(tzinfo=timezone.utc)
-    return start <= datetime.now(timezone.utc) < end
+    """Return whether a warning is in force now; an unreadable interval counts as current."""
+    interval = _warning_interval(warning)
+    return interval is None or interval[0] <= datetime.now(timezone.utc) < interval[1]
+
+
+def _warning_has_ended(warning: Dict[str, Any]) -> bool:
+    """Return whether a warning's interval is already over."""
+    interval = _warning_interval(warning)
+    return interval is not None and interval[1] <= datetime.now(timezone.utc)
 
 
 def _format_warning_item(warning: Dict[str, Any], *, include_description: bool = True) -> str:
@@ -236,12 +251,10 @@ WIND_DIRECTIONS = {
 # Source: https://api.ipma.pt/open-data/wind-speed-daily-classe.json
 WIND_SPEED_CLASSES = {
     -99: "--",
-    0: "Calm",
     1: "Weak",
     2: "Moderate",
     3: "Strong",
-    4: "Very strong",
-    5: "Exceptionally strong",
+    4: "Very strong"
 }
 
 # Precipitation Intensity Classes
@@ -259,23 +272,19 @@ PRECIPITATION_INTENSITY_CLASSES = {
 # Helper Functions with Optimizations
 # ==========================================================================
 
-def fetch_json(url: str, use_cache: bool = True) -> Optional[Any]:
-    """Fetch validated IPMA data while preserving forecast recovery metadata.
+def fetch_json(url: str) -> Optional[Any]:
+    """Fetch an IPMA resource, keeping stale-forecast provenance for the tools.
 
     Args:
-        url: Official IPMA resource URL.
-        use_cache: Whether a fresh successful snapshot can satisfy the request.
+        url: Official IPMA open-data URL.
 
     Returns:
-        Normalized data, or None when usable evidence is unavailable.
+        The payload (forecast objects also carry ``_ipma_stale`` and
+        ``_ipma_retrieved_at``), or None when no usable data is available.
     """
-    result = IPMA_CLIENT.fetch(url, use_cache=use_cache)
+    result = IPMA_CLIENT.fetch(url)
     if isinstance(result.data, dict):
-        return {
-            **result.data,
-            "_ipma_stale": result.stale,
-            "_ipma_retrieved_at": result.retrieved_at,
-        }
+        return {**result.data, "_ipma_stale": result.stale, "_ipma_retrieved_at": result.retrieved_at}
     return result.data
 
 
@@ -283,10 +292,9 @@ def _forecast_recovery_note(data: Dict[str, Any]) -> str:
     """Disclose when a previous forecast substitutes for a failed refresh."""
     if not data.get("_ipma_stale"):
         return ""
-    retrieved = data.get("_ipma_retrieved_at")
-    timestamp = retrieved.isoformat(timespec="seconds") if isinstance(retrieved, datetime) else str(retrieved)
+    retrieved = data["_ipma_retrieved_at"].astimezone(ZoneInfo("Europe/Lisbon")).strftime("%H:%M")
     return (
-        f"⚠️ Earlier forecast retrieved at {timestamp}; a newer forecast could not be obtained. "
+        f"⚠️ Earlier forecast retrieved at {retrieved}; a newer forecast could not be obtained. "
         "Current weather warnings must be confirmed separately.\n\n"
     )
 
@@ -413,20 +421,14 @@ def get_weather_warnings(area: str = "LSB") -> str:
     if data is None:
         return "❌ Failed to fetch weather warnings from IPMA."
 
-    if not isinstance(data, list):
-        return "❌ Unexpected response format from IPMA warnings API."
-
-    # Filter warnings for requested area and non-green levels
+    # Keep yellow/orange/red warnings for the requested area that have not ended.
     active_warnings = []
     area_label = _resolve_warning_area_label(area)
     for warning in data:
         warning_area = warning.get('idAreaAviso', '')
         level = warning.get('awarenessLevelID', 'green').lower()
-
-        # Skip if not for requested area or if green (no warning)
-        if warning_area != area or level == 'green':
+        if warning_area != area or level == 'green' or _warning_has_ended(warning):
             continue
-
         active_warnings.append(warning)
 
     if not active_warnings:

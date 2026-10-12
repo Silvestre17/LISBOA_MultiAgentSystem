@@ -48,6 +48,8 @@ from agent.utils.geographic_scope import (
 
 # Response formatting for Streamlit rendering
 from agent.utils.response_formatter import (
+    _has_material_weather_source_evidence,
+    _is_pure_weather_limitation,
     build_bilingual_note,
     build_bounded_planning_framework,
     canonicalize_planner_source_line,
@@ -8439,8 +8441,14 @@ class MultiAgentAssistant:
                 "",
                 final_output or "",
             ).rstrip()
+            if effective_agents == ["weather"] and _is_pure_weather_limitation(final_output):
+                final_output = re.sub(
+                    r"(?m)^\s*📌\s+\*\*(?:Fonte|Source):\*\*[^\n]*ipma\.pt[^\n]*$",
+                    "", final_output, flags=re.IGNORECASE,
+                ).rstrip()
         if (
             "weather" in effective_agents
+            and not _is_pure_weather_limitation(final_output)
             and not re.search(r"(?m)^\s*📌\s+\*\*(?:Fonte|Source):\*\*", final_output or "")
             and re.search(r"\b(?:IPMA|Limite IPMA|IPMA limit)\b", final_output or "")
         ):
@@ -12618,25 +12626,7 @@ class MultiAgentAssistant:
                 if operator_links:
                     links = operator_links
             elif agent_name == "weather":
-                weather_lower = output.lower()
-                weather_fact_re = re.compile(
-                    r"(?<![%\w])\d+(?:[.,]\d+)?\s*°\s*c\b"
-                    r"|\b(?:warnings?|avisos?)[^\n]*(?:no active|sem avisos|active|ativos?)"
-                    r"|\b(?:rain|chuva|precipita)[^\n:]{0,60}:\s*(?:\d|sem|no|muito|very|likely|prov[a-z]*|fraca|weak)"
-                    r"|\b(?:wind|vento)[^\n:]{0,60}:\s*[a-z]"
-                    r"|\b(?:periodos de ceu|períodos de céu|chuviscos|aguaceiros|light showers|sunny intervals|clear sky)\b",
-                    re.IGNORECASE,
-                )
-                weather_limitation_re = re.compile(
-                    r"\b(?:no detailed ipma forecast facts|no detailed weather facts|"
-                    r"nao ha dados detalhados do ipma|não há dados detalhados do ipma|"
-                    r"cannot confirm|can not confirm|can't confirm|nao consigo confirmar|não consigo confirmar|"
-                    r"please verify the latest|confirma (?:a )?(?:previs|meteorolog|ipma))\b",
-                    re.IGNORECASE,
-                )
-                has_weather_evidence = bool(weather_fact_re.search(weather_lower)) and not bool(
-                    weather_limitation_re.search(weather_lower)
-                )
+                has_weather_evidence = _has_material_weather_source_evidence(output)
                 if not has_weather_evidence:
                     links = [link for link in links if "ipma.pt" not in link.lower()]
             for link in links:

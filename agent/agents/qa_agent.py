@@ -25,6 +25,7 @@ from agent.prompts.qa import get_qa_prompt
 from agent.utils.response_formatter import (
     _LABEL_TRANSLATIONS,
     _count_structured_place_cards,
+    _is_pure_weather_limitation,
     missing_material_source_labels,
     _place_response_missing_required_fields,
     final_post_qa_guard,
@@ -3947,7 +3948,9 @@ class QualityAssuranceAgent(BaseAgent):
             ):
                 add_critical_issue("English running prose leaked into a Portuguese response.")
 
-        if structured_output and not source_footer_match:
+        # An IPMA answer that only reports unavailable data cites no source.
+        weather_data_unavailable = "ipma" in combined_output.lower() and _is_pure_weather_limitation(combined_output)
+        if structured_output and not source_footer_match and not weather_data_unavailable:
             add_critical_issue("Source footer is missing or malformed.")
         if source_footer_match:
             trailing_text = combined_output[source_footer_match.end():]
