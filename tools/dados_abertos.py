@@ -296,6 +296,20 @@ def fetch_geojson_with_retry(url: str) -> Optional[Dict[str, Any]]:
 
             data = response.json()
 
+            # ArcGIS can encode authentication/client errors inside HTTP 200.
+            # Repeating an anonymous request cannot recover a missing token.
+            provider_error = data.get("error") if isinstance(data, dict) else None
+            if isinstance(provider_error, dict):
+                try:
+                    error_code = int(provider_error.get("code", 0))
+                except (TypeError, ValueError):
+                    error_code = 0
+                if 400 <= error_code < 500 and error_code != 429:
+                    reason = f"Provider error {error_code}"
+                    _mark_dataset_url_unavailable(url, reason, error_code)
+                    logger.warning("Lisboa Aberta dataset unavailable: %s -> %s", url, reason)
+                    return None
+
             if not is_valid_geojson(data):
                 logger.error("Invalid GeoJSON structure (attempt %d/%d)", attempt + 1, MAX_RETRIES)
                 if attempt < last_index:
@@ -306,6 +320,13 @@ def fetch_geojson_with_retry(url: str) -> Optional[Dict[str, Any]]:
             feature_count = len(data.get('features', []))
             logger.info(f"\033[1;32m✅ Fetched {feature_count} features\033[0m")
             return data
+
+        except json.JSONDecodeError:
+            logger.error("Response is not valid JSON (attempt %d/%d)", attempt + 1, MAX_RETRIES)
+            if attempt < last_index:
+                _backoff(attempt)
+                continue
+            return None
 
         except (requests.exceptions.Timeout, requests.exceptions.RequestException) as exc:
             reason = "network timeout" if isinstance(exc, requests.exceptions.Timeout) else "network unavailable"
@@ -318,13 +339,6 @@ def fetch_geojson_with_retry(url: str) -> Optional[Dict[str, Any]]:
                 continue
             _mark_dataset_url_unavailable(url, reason, 503)
             logger.warning("Lisboa Aberta dataset temporarily unavailable: %s -> %s", url, reason)
-            return None
-
-        except json.JSONDecodeError:
-            logger.error("Response is not valid JSON (attempt %d/%d)", attempt + 1, MAX_RETRIES)
-            if attempt < last_index:
-                _backoff(attempt)
-                continue
             return None
 
     return None
@@ -1133,7 +1147,6 @@ def find_nearby_services(
         return f"❌ No compatible data source found for: '{service_type}'"
 
     selected_title = ""
-    selected_feature_count = 0
     results = []
     dataset_errors: List[str] = []
 
@@ -1202,7 +1215,6 @@ def find_nearby_services(
         candidate_results = candidate_results[:max_results]
         if candidate_results:
             selected_title = title
-            selected_feature_count = len(features)
             results = candidate_results
             break
 
@@ -1232,11 +1244,6 @@ def find_nearby_services(
             selected_title += f" ({'perto de' if is_pt else 'near'} {near_location_name})"
         else:
             selected_title += " (ordenado por distância)" if is_pt else " (sorted by distance)"
-
-    if not results:
-        if is_pt:
-            return f"✓ Fonte de dados '{selected_title}' carregada ({selected_feature_count} registos), mas não foi possível extrair dados de localização."
-        return f"✓ Data source '{selected_title}' loaded ({selected_feature_count} features) but couldn't extract location data."
 
     def _normalize_text(value: object) -> str:
         folded = unicodedata.normalize("NFKD", str(value or ""))
