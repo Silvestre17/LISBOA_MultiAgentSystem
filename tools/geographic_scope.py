@@ -107,6 +107,9 @@ OUTSIDE_AML_ROUTE_PLACES: Tuple[Tuple[str, str], ...] = (
 )
 
 AML_AMBIGUOUS_PLACE_EXCLUSIONS: Tuple[str, ...] = (
+    "vinho do porto",
+    "vinhos do porto",
+    "porto de lisboa",
     "guarda-chuva",
     "guarda chuva",
     "guarda de chuva",
@@ -201,6 +204,42 @@ def extract_outside_aml_mentions(text: str) -> List[str]:
             seen.add(label)
             found.append((match.start(), label))
     return [label for _index, label in sorted(found, key=lambda item: item[0])]
+
+
+_ACCENT_CLASSES = {"a": "[aáàâã]", "e": "[eéê]", "i": "[ií]", "o": "[oóôõ]", "u": "[uú]", "c": "[cç]"}
+_SCOPE_JOINER = r"(?:,|\be\b|\band\b|\bou\b|\bor\b)"
+_SCOPE_PLACE_PREFIX = r"(?:(?:em|no|na|nos|nas|in|at|for|para|do|da|de|of)\s+)?(?:(?:o|a|the)\s+)?"
+
+
+def strip_outside_aml_mentions(text: str) -> str:
+    """Remove outside-AML places joined to the rest of a request by "e", "and" or a comma.
+
+    "Há avisos em Lisboa e no Porto?" becomes "Há avisos em Lisboa?", so the
+    workers answer the AML part without reading the other place. A place that is
+    not joined that way, such as a route "de Lisboa para o Porto", stays.
+
+    Args:
+        text: User message.
+
+    Returns:
+        The message without the joined outside-AML places, or the original
+        message when any outside-AML place would remain.
+    """
+    result = str(text or "")
+    labels = set(extract_outside_aml_mentions(result))
+    for place, label in OUTSIDE_AML_ROUTE_PLACES:
+        if label not in labels:
+            continue
+        place_re = "".join(_ACCENT_CLASSES.get(char, re.escape(char)) for char in normalize_scope_text(place))
+        joined_before = rf"\s*{_SCOPE_JOINER}\s*{_SCOPE_PLACE_PREFIX}{place_re}\b"
+        joined_after = rf"\b{_SCOPE_PLACE_PREFIX}{place_re}\s*{_SCOPE_JOINER}\s*"
+        stripped = re.sub(joined_before, "", result, count=1, flags=re.IGNORECASE)
+        if stripped == result:
+            stripped = re.sub(joined_after, "", result, count=1, flags=re.IGNORECASE)
+        result = stripped
+    if extract_outside_aml_mentions(result):
+        return str(text or "")
+    return re.sub(r"\s+([?!.,;:])", r"\1", re.sub(r"\s{2,}", " ", result)).strip()
 
 
 def route_mentions_outside_aml(text: str) -> bool:

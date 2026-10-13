@@ -42,14 +42,18 @@ from agent.utils.langsmith_tracing import (
 )
 from agent.utils.geographic_scope import (
     extract_aml_municipality_mentions,
+    extract_outside_aml_mentions,
+    join_scope_labels,
     normalize_scope_text,
     route_mentions_outside_aml,
+    strip_outside_aml_mentions,
 )
 
 # Response formatting for Streamlit rendering
 from agent.utils.response_formatter import (
     _has_material_weather_source_evidence,
     _is_pure_weather_limitation,
+    _is_scope_limitation_response,
     build_bilingual_note,
     build_bounded_planning_framework,
     canonicalize_planner_source_line,
@@ -323,6 +327,58 @@ def _with_booking_limitation(final_output: str, language: str) -> str:
 # ==========================================================================
 
 
+# Time phrases share the route connectors ("de manhã", "à noite", "às 18:00"),
+# so they are removed before an origin/destination pair is read.
+_ROUTE_TEMPORAL_PHRASE_RE = re.compile(
+    r"\b(?:(?:hoje|amanh[ãa]|esta|logo)\s+)?(?:à|a|ao|de|da|pela|pelo|durante\s+a)\s+"
+    r"(?:noite|tarde|manh[ãa]|madrugada)\b"
+    r"|\b(?:ao|no)\s+(?:fim|final)\s+d[ao]\s+(?:dia|tarde|manh[ãa])\b"
+    r"|\b(?:às|as|at)\s+\d{1,2}(?:[:h]\d{2}|h)?\s*(?:am|pm)?(?!\w)"
+    r"|\b(?:in\s+the\s+(?:morning|afternoon|evening)|at\s+night|tonight)\b",
+    re.IGNORECASE,
+)
+# A QA finding about output language only ("mistura de inglês", "PT-PT").
+_LANGUAGE_ONLY_QA_FINDING_RE = re.compile(
+    r"\b(?:idioma|pt-pt|ingl[eê]s|english|language|mistura|mistos?|mixed|tradu\w*|r[oó]tulos?|labels?)\b",
+    re.IGNORECASE,
+)
+# Weather gear is never a route origin: "Preciso de casaco amanhã à noite?".
+_WEATHER_GEAR_RE = re.compile(
+    r"^(?:um\s+|uma\s+|a\s+|an\s+)?(?:casacos?|guarda[-\s]?chuvas?|chap[eé]us?|protetor\s+solar|"
+    r"roupa|impermeave(?:l|is)|jackets?|coats?|umbrellas?|hats?|sunscreen)\b",
+    re.IGNORECASE,
+)
+
+
+def _with_outside_scope_note(text: str, outside_labels: List[str], language: str) -> str:
+    """Note the outside-AML places removed from a mixed request before answering it.
+
+    Args:
+        text: Final answer, which covers the AML part of the request.
+        outside_labels: Outside-AML places removed from the user message.
+        language: Output language code.
+
+    Returns:
+        The answer with a scope note before the source footer, when needed.
+    """
+    if not outside_labels or _is_scope_limitation_response(text):
+        return text
+    places = join_scope_labels(outside_labels, language)
+    plural = len(outside_labels) > 1
+    note = (
+        f"ℹ️ **Âmbito:** {places} {'ficam' if plural else 'fica'} fora da Área Metropolitana de Lisboa; "
+        "esta resposta cobre apenas a AML."
+        if language == "pt"
+        else f"ℹ️ **Scope:** {places} {'are' if plural else 'is'} outside the Lisbon Metropolitan Area; "
+        "this answer only covers the AML."
+    )
+    if note in text:
+        return text
+    footer = re.search(r"(?m)^📌\s+\*\*(?:Fonte|Source):\*\*", text)
+    if footer:
+        return f"{text[:footer.start()].rstrip()}\n\n{note}\n\n{text[footer.start():]}"
+    return f"{text.rstrip()}\n\n{note}"
+
 class MultiAgentAssistant:
     """
     Multi-Agent Lisbon Urban Assistant.
@@ -366,6 +422,8 @@ class MultiAgentAssistant:
         # Initialize state
         self.state = create_initial_state()
         self.last_execution_summary: Dict[str, Any] | None = None
+        # Outside-AML places removed from the current mixed-scope request.
+        self._turn_outside_scope_labels: List[str] = []
 
         self.model_info = {
             "supervisor": self.supervisor.get_model_info(),
@@ -2708,8 +2766,9 @@ class MultiAgentAssistant:
         cleaned = re.sub(r"[*_`#\[\]()]|https?://\S+", "", str(value or ""))
         cleaned = re.sub(r"^\s*(?:o|a|os|as|the)\s+", "", cleaned, flags=re.IGNORECASE)
         for cleanup_re in (
-            r"\s+(?:de\s+metro|de\s+autocarro|de\s+comboio|de\s+transportes?(?:\s+p[úu]blicos?)?|by\s+metro|by\s+bus|by\s+train|by\s+public\s+transport)\b.*$",
+            r"\s+(?:de\s+metro|de\s+autocarro|de\s+comboio|de\s+el[eé]trico|de\s+transportes?(?:\s+p[úu]blicos?)?|by\s+metro|by\s+bus|by\s+train|by\s+tram|by\s+public\s+transport)\b.*$",
             r"\s+(?:a|à)\s+noite\b.*$|\s+(?:at\s+night|tonight)\b.*$",
+            r"\s+(?:hoje|amanh[ãa]|agora|today|tomorrow|now)\b.*$",
             r"\s*(?:\||,|;|\(|-)\s*(?:evitando|avoiding|sem|without|outros?\s+meios?|"
             r"outros?\s+transportes?|other\s+(?:ways?|transport|transit)|alternativas?).*$",
             r"\s+(?:evitando|avoiding)\s+(?:metro|autocarros?|comboios?|bus(?:es)?|train(?:s)?)\b.*$",
@@ -2735,8 +2794,9 @@ class MultiAgentAssistant:
             r"\b(?:de|do|da|desde|from)\s+(?P<origin>.+?)\s+(?:para|aos|às|ao|à|at[eé]|ate|a|to)\s+"
             r"(?!que\s+horas?\b|what\s+time\b)(?P<destination>[^?.!\n]{2,160})",
         )
+        scan_text = _ROUTE_TEMPORAL_PHRASE_RE.sub(" ", text)
         for pattern in patterns:
-            match = re.search(pattern, text, flags=re.IGNORECASE)
+            match = re.search(pattern, scan_text, flags=re.IGNORECASE)
             if not match:
                 continue
             origin = MultiAgentAssistant._clean_transport_route_endpoint(match.group("origin"))
@@ -2756,7 +2816,7 @@ class MultiAgentAssistant:
                 flags=re.IGNORECASE,
             )
             origin = re.sub(
-                r"^\s*(?:metro|autocarros?|comboios?|bus(?:es)?|train(?:s)?)\s+"
+                r"^\s*(?:metro|autocarros?|comboios?|bus(?:es)?|train(?:s)?|ir|seguir|partir|sair)\s+"
                 r"(?:de|do|da|desde|from)\s+",
                 "",
                 origin,
@@ -2774,6 +2834,8 @@ class MultiAgentAssistant:
             if re.search(r"\b(?:indica a morada|specify the address|provide the exact address)\b", folded_destination):
                 continue
             if MultiAgentAssistant._fold_context_text(origin) in {"metro", "autocarro", "autocarros", "bus", "comboio", "train"}:
+                continue
+            if _WEATHER_GEAR_RE.match(origin):
                 continue
             if len(origin) >= 2 and len(destination) >= 2:
                 return {"origin": origin, "destination": destination}
@@ -3713,16 +3775,24 @@ class MultiAgentAssistant:
         if mode_hint not in {"de metro", "de autocarro", "de comboio", "by metro", "by bus", "by train"}:
             mode_hint = ""
         if re.search(r"\b(?:a\s+noite|à\s+noite|esta\s+noite|tonight|at\s+night)\b", normalized):
+            # The day stays: "amanhã à noite" must not read as tonight.
+            day_match = re.search(
+                r"\b(?:depois\s+de\s+amanh[ãa]|amanh[ãa]|hoje|(?:segunda|ter[çc]a|quarta|quinta|sexta)(?:-feira)?|"
+                r"s[áa]bado|domingo|tomorrow|today|(?:on\s+)?(?:mon|tues|wednes|thurs|fri|satur|sun)day)\b",
+                message,
+                flags=re.IGNORECASE,
+            )
+            day = f" {day_match.group(0)}" if day_match else ""
             if language == "pt":
                 mode = f"{mode_hint} " if mode_hint else ""
                 return (
-                    f"Quero ir {mode}de {origin} para {destination}. "
+                    f"Quero ir {mode}de {origin} para {destination}{day}. "
                     "O pedido é para o período noturno: distingue disponibilidade de serviço "
                     "de perturbações reportadas e não inventes horários."
                 )
             mode = f"{mode_hint} " if mode_hint else ""
             return (
-                f"I want to go {mode}from {origin} to {destination}. "
+                f"I want to go {mode}from {origin} to {destination}{day}. "
                 "The request is for the night period: distinguish service availability "
                 "from reported disruptions and do not invent timetables."
             )
@@ -6535,6 +6605,7 @@ class MultiAgentAssistant:
             return self._publish_final_response(
                 self._with_bilingual_note(str(response or "").strip()),
                 message=message,
+                language=language,
                 effective_agents=effective_agents,
                 routing_reasoning=routing_reasoning,
                 agents_to_call=agents_to_call,
@@ -8369,6 +8440,7 @@ class MultiAgentAssistant:
         return self._publish_final_response(
             final_output,
             message=message,
+            language=language,
             effective_agents=effective_agents,
             routing_reasoning=routing_reasoning,
             agents_to_call=agents_to_call,
@@ -8417,6 +8489,7 @@ class MultiAgentAssistant:
         final_output: str,
         *,
         message: str,
+        language: str,
         effective_agents: List[str],
         routing_reasoning: str,
         agents_to_call: List[str],
@@ -8458,6 +8531,10 @@ class MultiAgentAssistant:
                 f"{final_output.rstrip()}\n\n📌 **Fonte:** [*IPMA*](https://www.ipma.pt) | **Atualizado:** {stamp}"
                 if is_pt
                 else f"{final_output.rstrip()}\n\n📌 **Source:** [*IPMA*](https://www.ipma.pt/en/) | **Updated:** {stamp}"
+            )
+        if not direct_response_used:
+            final_output = _with_outside_scope_note(
+                final_output, self._turn_outside_scope_labels, language
             )
         self._update_conversation_anchors(message, final_output, effective_agents)
 
@@ -8787,19 +8864,23 @@ class MultiAgentAssistant:
     def _should_run_final_qa_repair(
         qa_result: Optional[Dict[str, object]],
     ) -> bool:
-        """Returns whether a final QA repair pass is worth running."""
+        """Returns whether a final QA repair pass is worth running.
+
+        Language consistency is checked deterministically (mixed labels,
+        English prose in a Portuguese answer) and reported as a critical
+        issue. When those checks pass, findings that are only about language,
+        typically a proper name such as "Puppet Museum", do not justify an
+        LLM rewrite of a grounded answer.
+        """
         if not qa_result:
             return False
-        if qa_result.get("needs_repair"):
-            return True
-        if qa_result.get("missing_data"):
-            return True
-
         fact_check = qa_result.get("fact_check", {})
-        if isinstance(fact_check, dict) and fact_check.get("critical_issues"):
+        if qa_result.get("critical_issues") or (isinstance(fact_check, dict) and fact_check.get("critical_issues")):
             return True
-
-        return False
+        missing_data = list(qa_result.get("missing_data") or [])
+        if any(not _LANGUAGE_ONLY_QA_FINDING_RE.search(str(item)) for item in missing_data):
+            return True
+        return bool(qa_result.get("needs_repair")) and not missing_data
 
     @classmethod
     def _merge_qa_result_payloads(
@@ -10493,6 +10574,19 @@ class MultiAgentAssistant:
         if self._turn_requests_context_reset(message):
             self.reset()
             message = self._strip_context_reset_prefix(message) or message
+        # "Avisos em Lisboa e no Porto": the workers answer the AML part only and
+        # the final answer notes the places left out. Routes keep the scope refusal.
+        self._turn_outside_scope_labels = []
+        outside_labels = extract_outside_aml_mentions(message)
+        if (
+            outside_labels
+            and extract_aml_municipality_mentions(message)
+            and not self.supervisor._is_geographic_out_of_scope_route(message)
+        ):
+            aml_message = strip_outside_aml_mentions(message)
+            if aml_message != message:
+                self._turn_outside_scope_labels = outside_labels
+                message = aml_message
         self._append_user_message(message)
         start_time = time.time()
         run_workers_in_parallel = False

@@ -19,4 +19,5 @@ from tools.geographic_scope import (  # noqa: F401
     join_scope_labels,
     normalize_scope_text,
     route_mentions_outside_aml,
+    strip_outside_aml_mentions,
 )
