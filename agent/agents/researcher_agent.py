@@ -2093,8 +2093,11 @@ class ResearcherAgent(BaseAgent):
         explicit_pagination_patterns = [
             r"\b(?:next|following|another)\s+(?:\d{1,2}\s+)?(?:results?|places?|events?|options?)\b",
             r"\bmore\s+(?:\d{1,2}\s+)?(?:results?|places?|events?|options?)\b",
-            r"\b(?:mais|proxim[oa]s?|seguintes?)\s+(?:(?:\d{1,2}|um|uma|dois|duas|tr[eê]s|tres|quatro|cinco|seis|sete|oito|nove|dez)\s+)?(?:resultados?|locais?|eventos?|op[cç][oõ]es|opcoes)\b",
-            r"\b(?:mostra|mostre|d[aá]-me|quero)\s+mais\b",
+            r"\b(?:mais|proxim[oa]s?|seguintes?)\s+(?:(?:\d{1,2}|um|uma|dois|duas|tr[eê]s|tres|quatro|cinco|seis|sete|oito|nove|dez)\s+)?"
+            r"(?:resultados?|locais?|eventos?|op[cç][oõ]es|opcoes|atracoes|restaurantes?|museus?|miradouros?|jardins?|monumentos?|bares?)\b",
+            # "Mostra-me mais", "dá-me mais", "show me more".
+            r"\b(?:mostra|mostre|da|quero)(?:-me)?\s+mais\b(?!\s+(?:informac|detalhe|sobre))",
+            r"\b(?:show|give)\s+(?:me\s+)?more\b",
             r"\b(?:outro|outra|outros|outras)\s+(?:(?:\d{1,2}|um|uma|dois|duas|tr[eê]s|tres|quatro|cinco|seis|sete|oito|nove|dez)\s+)?(?:resultados?|locais?|eventos?|op[cç][oõ]es|opcoes|atra[cç][oõ]es|atracoes|restaurantes?|museus?)\b",
             r"^\s*(?:outro|outra|outros|outras|mais\s+um|mais\s+uma|another|one\s+more)\s*$",
         ]

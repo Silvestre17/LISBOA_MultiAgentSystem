@@ -4030,13 +4030,16 @@ class QualityAssuranceAgent(BaseAgent):
             place_card_count = _count_structured_place_cards(combined_output)
             if place_card_count == 0:
                 add_critical_issue("Place cards collapsed into summary text and lost the canonical layout.")
+            # Description, hours and website are often absent from the source
+            # record, and an absent field is omitted; only a card without its
+            # address is defective. The formatter restores fields that a
+            # rewrite dropped from the worker cards.
             elif _place_response_missing_required_fields(
                 combined_output,
                 place_card_count,
+                required_fields=("address",),
             ):
-                add_critical_issue(
-                    "Place cards are missing canonical fields such as description, address, opening hours, or website."
-                )
+                add_critical_issue("Place cards are missing their address.")
 
         result = {
             "valid": len(critical_issues) == 0,

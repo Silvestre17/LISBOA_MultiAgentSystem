@@ -415,8 +415,12 @@ class WeatherAgent(BaseAgent):
         if any(term in normalized for term in ["tonight", "esta noite", "hoje a noite"]):
             return {"day_offset": 0, "days": 1, "label": "tonight"}
 
-        if any(term in normalized for term in ["today", "hoje", "agora"]) and any(
-            term in normalized for term in ["forecast", "previsao", "weather", "tempo", "detalhada", "detailed"]
+        # "Vai chover hoje?" asks for today's forecast as much as "tempo hoje".
+        if any(term in normalized for term in ["today", "hoje", "agora"]) and re.search(
+            r"\b(?:forecast|previsao|weather|tempo|detalhada|detailed|chover|chuva|rain|raining|"
+            r"temperatura|temperature|vento|wind|sol|sunny|frio|calor|cold|hot|casaco|jacket|coat|"
+            r"guarda[-\s]?chuva|umbrella)\b",
+            normalized,
         ):
             return {"day_offset": 0, "days": 1, "label": "today"}
 
@@ -1458,13 +1462,13 @@ class WeatherAgent(BaseAgent):
             if "weekend" in normalized or "fim de semana" in normalized:
                 coverage = cls._weekend_coverage_sentence(forecast_window, is_pt)
                 warning_answer = period_answer or (
-                    "✅ Não há **avisos meteorológicos ativos** para Lisboa neste momento."
+                    "✅ **Resposta direta:** não há **avisos meteorológicos ativos** para Lisboa neste momento."
                     if is_pt and no_warnings
-                    else "✅ No, there are **no active weather warnings** for Lisbon right now."
+                    else "✅ **Direct answer:** no, there are **no active weather warnings** for Lisbon right now."
                     if no_warnings
-                    else "⚠️ Há avisos meteorológicos ativos para Lisboa."
+                    else "⚠️ **Resposta direta:** há avisos meteorológicos ativos para Lisboa."
                     if is_pt
-                    else "⚠️ There are active weather warnings for Lisbon."
+                    else "⚠️ **Direct answer:** there are active weather warnings for Lisbon."
                 )
                 return f"{warning_answer}\n\n{coverage}".strip()
             if period_answer:
@@ -1472,15 +1476,15 @@ class WeatherAgent(BaseAgent):
             out_of_horizon_day = cls._named_day_outside_horizon_sentence(user_message, is_pt)
             if no_warnings:
                 warning_answer = (
-                    "✅ Não, não há **avisos meteorológicos ativos** para Lisboa neste momento."
+                    "✅ **Resposta direta:** não, não há **avisos meteorológicos ativos** para Lisboa neste momento."
                     if is_pt
-                    else "✅ No, there are **no active weather warnings** for Lisbon right now."
+                    else "✅ **Direct answer:** no, there are **no active weather warnings** for Lisbon right now."
                 )
                 return f"{warning_answer}\n\n{out_of_horizon_day}".strip()
             warning_answer = (
-                "⚠️ Sim, há **avisos meteorológicos ativos** para Lisboa neste momento."
+                "⚠️ **Resposta direta:** sim, há **avisos meteorológicos ativos** para Lisboa neste momento."
                 if is_pt
-                else "⚠️ Yes, there are **active weather warnings** for Lisbon right now."
+                else "⚠️ **Direct answer:** yes, there are **active weather warnings** for Lisbon right now."
             )
             return f"{warning_answer}\n\n{out_of_horizon_day}".strip()
 
@@ -1528,6 +1532,9 @@ class WeatherAgent(BaseAgent):
             "ficar fora",
             "umbrella",
             "guarda chuva",
+            "jacket",
+            "coat",
+            "casaco",
             "hat",
             "cap",
             "sunscreen",
@@ -1567,18 +1574,20 @@ class WeatherAgent(BaseAgent):
             )
             asks_umbrella = bool(re.search(r"\b(?:umbrella|guarda[-\s]?chuva|impermeavel|rain shell)\b", normalized))
             asks_jacket = bool(re.search(r"\b(?:jacket|coat|casaco)\b", normalized))
-            asks_rain_context = bool(
-                asks_umbrella
-                or re.search(r"\b(?:rain|raining|chuva|chover|precipitacao|precipitation)\b", normalized)
+            asks_rain = bool(re.search(r"\b(?:rain|raining|chuva|chover|precipitacao|precipitation)\b", normalized))
+            # An explicit rain question gets its own sentence in the direct
+            # answer; an umbrella answer already states the rain outlook.
+            rain_answer = (
+                f" {cls._rain_direct_answer(rain, is_pt)}" if rain and asks_rain and not asks_umbrella else ""
             )
-            # Rain evidence follows the direct answer instead of preceding it.
-            rain_answer = f"\n\n{cls._rain_direct_answer(rain, is_pt)}" if rain and asks_rain_context else ""
             explicitly_requested_items = sum([asks_sun_protection, asks_umbrella, asks_jacket])
             if explicitly_requested_items > 1:
                 probability = float(rain.get("probability", 0) or 0) if rain else 0.0
                 warm_note = bool(max_temp is not None and max_temp >= 24)
                 advice_lines: list[str] = []
+                verdicts: list[str] = []
                 if asks_jacket:
+                    verdicts.append("leva um casaco leve" if is_pt else "bring a light jacket")
                     advice_lines.append(
                         (
                             f"- 🧥 **Casaco:** sim, leva um casaco leve{cls._jacket_reason(minimum, rain, is_pt)}."
@@ -1588,12 +1597,16 @@ class WeatherAgent(BaseAgent):
                     )
                 if asks_umbrella:
                     if probability < 25:
+                        verdicts.append(
+                            "o guarda-chuva não parece necessário" if is_pt else "an umbrella is probably not needed"
+                        )
                         advice_lines.append(
                             "- ☂️ **Guarda-chuva:** não parece necessário; a chuva está pouco provável."
                             if is_pt
                             else "- ☂️ **Umbrella:** probably not needed; rain looks unlikely."
                         )
                     else:
+                        verdicts.append("leva guarda-chuva" if is_pt else "bring an umbrella")
                         advice_lines.append(
                             "- ☂️ **Guarda-chuva:** leva um compacto ou impermeável, porque há possibilidade de chuva."
                             if is_pt
@@ -1621,6 +1634,7 @@ class WeatherAgent(BaseAgent):
                             if warm_note and maximum
                             else " if you will be outdoors for a long period"
                         )
+                    verdicts.append(f"leva {sun_item}" if is_pt else f"bring {sun_item}")
                     advice_lines.append(
                         (
                             f"- 🧢 **Sol:** leva **{sun_item}**{sun_reason}."
@@ -1629,9 +1643,9 @@ class WeatherAgent(BaseAgent):
                         )
                     )
                 direct_line = (
-                    "✅ **Resposta direta:** sim, ajusta o que levas às condições previstas para os itens que perguntaste."
+                    f"✅ **Resposta direta:** {'; '.join(verdicts)}."
                     if is_pt
-                    else "✅ **Direct answer:** yes, adjust what you bring to the forecast conditions for the items you asked about."
+                    else f"✅ **Direct answer:** {'; '.join(verdicts)}."
                 )
                 return f"{direct_line}{rain_answer}\n\n" + "\n".join(advice_lines)
             if asks_sun_protection:
@@ -1655,11 +1669,11 @@ class WeatherAgent(BaseAgent):
                 probability = float(rain.get("probability", 0) or 0) if rain else 0.0
                 if is_pt:
                     if probability < 25:
-                        return f"✅ **Resposta direta:** não parece necessário levares guarda-chuva; a chuva está pouco provável.{rain_answer}"
-                    return f"✅ **Resposta direta:** leva um **guarda-chuva compacto** ou impermeável, porque há possibilidade de chuva.{rain_answer}"
+                        return "✅ **Resposta direta:** não parece necessário levares guarda-chuva; a chuva está pouco provável."
+                    return "✅ **Resposta direta:** leva um **guarda-chuva compacto** ou impermeável, porque há possibilidade de chuva."
                 if probability < 25:
-                    return f"✅ **Direct answer:** you probably do not need an umbrella; rain looks unlikely.{rain_answer}"
-                return f"✅ **Direct answer:** bring a **compact umbrella** or rain shell because rain is possible.{rain_answer}"
+                    return "✅ **Direct answer:** you probably do not need an umbrella; rain looks unlikely."
+                return "✅ **Direct answer:** bring a **compact umbrella** or rain shell because rain is possible."
             if asks_jacket:
                 return f"{cls._jacket_answer(minimum, rain, is_pt)}{rain_answer}"
             # A wind layer is advice for a strong wind, or a moderate one on a cool day.

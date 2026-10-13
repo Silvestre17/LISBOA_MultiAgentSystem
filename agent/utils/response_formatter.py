@@ -68,7 +68,7 @@ _NON_EVIDENCE_SOURCE_FOOTER_RE = re.compile(
 )
 
 _PT_LANGUAGE_HINTS_RE = re.compile(
-    r"\b(olá|ola|bom dia|boa tarde|boa noite|como|qual|quais|quero|queria|quiser|puder|afinal|preciso|vou|ir|usar|existem|h[aá]|est[aá]|planeia|planejar|plano|roteiro|sugere|visitar|passeio|museu|museus|evento|eventos|hoje|amanhã|amanha|previsão|tempo|locais|morada|fonte|autocarro|autocarros|comboio|comboios|linhas?|perturba[cç][aã]o|perturba[cç][oõ]es|transportes?|situa[cç][aã]o|d[aá]-?me|leva-me|evita|apanh(?:a|ar)|bairro|perto|entre|até|ate|centro\s+comercial|compras?|lojas?|lisboa|pr[oó]xim[oa]s?|obrigad[oa]s?|onde|agora)\b|"
+    r"\b(olá|ola|bom dia|boa tarde|boa noite|como|qual|quais|quando|quanto|quantos|quantas|passa|chega|sai|demora|quero|queria|quiser|puder|afinal|preciso|vou|ir|usar|existem|h[aá]|est[aá]|planeia|planejar|plano|roteiro|sugere|visitar|passeio|museu|museus|evento|eventos|hoje|amanhã|amanha|previsão|tempo|locais|morada|fonte|autocarro|autocarros|comboio|comboios|linhas?|perturba[cç][aã]o|perturba[cç][oõ]es|transportes?|situa[cç][aã]o|d[aá]-?me|leva-me|evita|apanh(?:a|ar)|bairro|perto|entre|até|ate|centro\s+comercial|compras?|lojas?|lisboa|pr[oó]xim[oa]s?|obrigad[oa]s?|onde|agora)\b|"
     r"\be\s+se\b",
     re.IGNORECASE,
 )
@@ -1274,8 +1274,13 @@ def canonicalize_weather_terms(text: str, language: str = "en") -> str:
             (r"\bSouth\b", "Sul"),
             (r"\bWest\b", "Oeste"),
             (r"\bEast\b", "Leste"),
+            # Wind ("o vento") takes the masculine form; precipitation
+            # intensity ("a chuva") takes the feminine one.
+            (r"\bVery strong\b", "muito forte"),
+            (r"(\b(?:Wind|Vento)\b[^\n]*?)\bWeak\b", r"\1fraco"),
+            (r"(\b(?:Wind|Vento)\b[^\n]*?)\bModerate\b", r"\1moderado"),
             (r"\bWeak\b", "fraca"),
-            (r"\bModerate\b", "moderado"),
+            (r"\bModerate\b", "moderada"),
             (r"\bStrong\b", "forte"),
         ]
 
@@ -6034,6 +6039,7 @@ def _extract_first_url(value: str) -> str:
 
 
 _CANONICAL_PLACE_CARD_START_RE = re.compile(r"^###\s+(?P<emoji>\S+)\s+(?P<title>.+?)\s*$")
+_PLACE_CARD_FIELD_LINE_RE = re.compile(r"^\s*[-*]\s+(?:\S+\s+)?\*\*[^*\n]+:\*\*")
 
 
 def _iter_structured_place_card_sections(text: str) -> List[List[str]]:
@@ -6059,7 +6065,13 @@ def _iter_structured_place_card_sections(text: str) -> List[List[str]]:
     if current_section:
         sections.append(current_section)
 
-    return sections
+    # A response title ("### 🏛️ **Museus em Lisboa**") has the card heading
+    # shape; only a section that lists at least one field ("- 📍 **Morada:**")
+    # is a place card.
+    return [
+        section for section in sections
+        if any(_PLACE_CARD_FIELD_LINE_RE.match(line) for line in section[1:])
+    ]
 
 
 def _count_structured_place_cards(text: str) -> int:
@@ -6273,8 +6285,19 @@ def _place_response_lost_worker_fields(text: str, worker_canonical: str) -> bool
 def _place_response_missing_required_fields(
     text: str,
     place_card_count: int,
+    required_fields: tuple[str, ...] = ("description", "address", "hours", "website"),
 ) -> bool:
-    """Return whether any structured place card is missing canonical core fields."""
+    """Return whether any structured place card is missing a required field.
+
+    Args:
+        text: Response with structured place cards.
+        place_card_count: Number of cards expected in the response.
+        required_fields: Fields every card must show, among ``description``,
+            ``address``, ``hours`` and ``website``.
+
+    Returns:
+        True when a card is missing, or lacks one of the required fields.
+    """
     if place_card_count <= 0:
         return True
 
@@ -6285,27 +6308,27 @@ def _place_response_missing_required_fields(
     for section in sections[:place_card_count]:
         section_text = "\n".join(section)
         normalized = _strip_accents_compat(_strip_markdown_formatting(section_text)).lower()
-
-        has_description = bool(
-            re.search(r"\b(description|descricao)\b", normalized)
-            or re.search(r"^\s*[-*]\s+📝", section_text, re.MULTILINE)
-        )
-        has_address = bool(
-            re.search(r"\b(address|morada|location|localizacao|endereco)\b", normalized)
-            or re.search(r"^\s*[-*]\s+📍", section_text, re.MULTILINE)
-        )
-        has_hours = bool(
-            re.search(r"\b(hours|opening hours|today|horario|horarios de funcionamento|hoje)\b", normalized)
-            or re.search(r"^\s*[-*]\s+🕐", section_text, re.MULTILINE)
-            or re.search(r"\b(check the official website|consultar website oficial)\b", normalized)
-        )
-        has_website = bool(
-            re.search(r"\b(website|site oficial|official page|url)\b", normalized)
-            or re.search(r"^\s*[-*]\s+(?:🌐|🔗)", section_text, re.MULTILINE)
-            or re.search(r"\b(check the official website|consultar website oficial)\b", normalized)
-        )
-
-        if not (has_description and has_address and has_hours and has_website):
+        present = {
+            "description": bool(
+                re.search(r"\b(description|descricao)\b", normalized)
+                or re.search(r"^\s*[-*]\s+📝", section_text, re.MULTILINE)
+            ),
+            "address": bool(
+                re.search(r"\b(address|morada|location|localizacao|endereco)\b", normalized)
+                or re.search(r"^\s*[-*]\s+📍", section_text, re.MULTILINE)
+            ),
+            "hours": bool(
+                re.search(r"\b(hours|opening hours|today|horario|horarios de funcionamento|hoje)\b", normalized)
+                or re.search(r"^\s*[-*]\s+🕐", section_text, re.MULTILINE)
+                or re.search(r"\b(check the official website|consultar website oficial)\b", normalized)
+            ),
+            "website": bool(
+                re.search(r"\b(website|site oficial|official page|url)\b", normalized)
+                or re.search(r"^\s*[-*]\s+(?:🌐|🔗)", section_text, re.MULTILINE)
+                or re.search(r"\b(check the official website|consultar website oficial)\b", normalized)
+            ),
+        }
+        if not all(present[field] for field in required_fields):
             return True
 
     return False
@@ -10959,7 +10982,8 @@ def split_inline_emoji_fields(text: str) -> str:
             continue
         output_lines.append(
             re.sub(
-                rf"(?<=[^\s-])\s+(?=(?:{markers})\s+{label_words})",
+                # Never after "#": "### 🚇 **Next metro at X**" is one heading.
+                rf"(?<=[^\s#-])\s+(?=(?:{markers})\s+{label_words})",
                 "\n\n",
                 line,
                 flags=re.IGNORECASE,

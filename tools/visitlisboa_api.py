@@ -1470,6 +1470,8 @@ def _place_icon_for_category(category: str) -> str:
         return "🍽️"
     if "hotel" in normalized or "alojamento" in normalized:
         return "🛏️"
+    if "view point" in normalized or "viewpoint" in normalized or "miradouro" in normalized:
+        return "🌅"
     if "park" in normalized or "garden" in normalized or "jardim" in normalized or "parque" in normalized:
         return "🌳"
     if "beach" in normalized or "praia" in normalized or "surf" in normalized:
