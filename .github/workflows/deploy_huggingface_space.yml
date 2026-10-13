@@ -127,11 +127,11 @@ jobs:
 
           # LISBOA | Lisbon AI Urban Assistant
 
-          LISBOA is a non-commercial Master's thesis prototype developed at NOVA IMS. It explores a multi-agent AI approach for Lisbon tourism and urban mobility assistance, combining LLM orchestration with grounded data sources such as IPMA weather, Metro de Lisboa, Carris, Carris Metropolitana, CP, VisitLisboa, Lisboa Aberta, and curated local knowledge.
+          LISBOA is a non-commercial academic prototype developed at NOVA IMS as part of a Master's thesis and of an article published in *Results in Engineering*. It explores a multi-agent AI approach for Lisbon tourism and urban mobility assistance, combining LLM orchestration with grounded data sources such as IPMA weather, Metro de Lisboa, Carris, Carris Metropolitana, CP, VisitLisboa, Lisboa Aberta, and curated local knowledge.
 
           ## Purpose
 
-          This Space hosts the user-facing LISBOA prototype for academic demonstration and user-study evaluation. It allows participants to interact with the system through a public web interface while the implementation continues to evolve during the thesis period.
+          This Space hosts the user-facing LISBOA prototype for academic demonstration. It is the system described and evaluated in the published article and the thesis, and it remains available for public use.
 
           ## Core Capabilities
 
@@ -144,7 +144,9 @@ jobs:
           ## Research Context
 
           - Project: LISBOA: Lisbon Itinerary System Based On AI
-          - Scope: Master's Thesis Prototype, Non-Commercial Academic Use
+          - Article: Silvestre, A., Jardim, B., & de Castro Neto, M. (2026). A multi-agent approach for context-aware tourism and urban mobility guidance. *Results in Engineering*, 32, 113369. https://doi.org/10.1016/j.rineng.2026.113369
+          - Source code and evaluation artifacts: [GitHub](https://github.com/Silvestre17/LISBOA_MultiAgentSystem) and [Zenodo](https://doi.org/10.5281/zenodo.23322220)
+          - Scope: Master's thesis prototype, non-commercial academic use
           - Institution: NOVA IMS, Universidade NOVA de Lisboa
 
           ## Data and Runtime Notes
