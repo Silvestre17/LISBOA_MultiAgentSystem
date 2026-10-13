@@ -37,6 +37,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 LISBON_TIMEZONE_NAME = "Europe/Lisbon"
+ARTICLE_DOI_URL = "https://doi.org/10.1016/j.rineng.2026.113369"
+SOFTWARE_DOI_URL = "https://doi.org/10.5281/zenodo.23322220"
 
 
 def get_lisbon_timezone() -> ZoneInfo | timezone:
@@ -214,7 +216,7 @@ TRANSLATIONS = {
         "info_title": "LISBOA",
         "info_subtitle": "Lisbon Itinerary System Based On AI",
         "info_intro": "An academic multi-agent prototype that helps users ask grounded questions about Lisbon tourism, mobility, weather, local services, and itineraries.",
-        "info_badge": "Master's Thesis Project",
+        "info_badge": "Master's Thesis and Published Article",
         "info_stat_agents_value": "6",
         "info_stat_agents_label": "Coordinated Agents",
         "info_stat_tools_value": "45",
@@ -300,6 +302,9 @@ TRANSLATIONS = {
         "info_supervisors_names": "Prof. Dr. Bruno Jardim   •   Prof. Dr. Miguel de Castro Neto",
         "info_author_github": "GitHub",
         "info_author_linkedin": "LinkedIn",
+        "info_author_article": "Article",
+        "info_author_software": "Software DOI",
+        "info_publication_label": "Published in",
         "discover_eyebrow": "New here?",
         "discover_title": "Discover how LISBOA works",
         "discover_subtitle": "A multi-agent system grounding live transport, weather, events and tourism data into feasible itineraries for Lisbon.",
@@ -376,7 +381,7 @@ TRANSLATIONS = {
         "info_title": "LISBOA",
         "info_subtitle": "Lisbon Itinerary System Based On AI",
         "info_intro": "Um protótipo académico multi-agente que ajuda a fazer perguntas fundamentadas sobre turismo, mobilidade, meteorologia, serviços locais e roteiros em Lisboa.",
-        "info_badge": "Projeto de Tese de Mestrado",
+        "info_badge": "Tese de Mestrado e Artigo Publicado",
         "info_stat_agents_value": "6",
         "info_stat_agents_label": "Agentes Coordenados",
         "info_stat_tools_value": "45",
@@ -462,6 +467,9 @@ TRANSLATIONS = {
         "info_supervisors_names": "Prof. Dr. Bruno Jardim      •      Prof. Dr. Miguel de Castro Neto",
         "info_author_github": "GitHub",
         "info_author_linkedin": "LinkedIn",
+        "info_author_article": "Artigo",
+        "info_author_software": "DOI do software",
+        "info_publication_label": "Publicado em",
         "discover_eyebrow": "Primeira visita?",
         "discover_title": "Descubra como o LISBOA funciona",
         "discover_subtitle": "Um sistema multi-agente que combina dados ao vivo de transportes, meteorologia, eventos e turismo em roteiros viáveis para Lisboa.",
@@ -3393,8 +3401,8 @@ def run_info_page() -> None:
         }
 
         .info-author-links {
-            display: flex;
-            flex-wrap: wrap;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
             justify-content: flex-end;
             gap: 0.6rem;
         }
@@ -3440,6 +3448,22 @@ def run_info_page() -> None:
         .info-author-link-linkedin::before {
             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23111827' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-4 0v7h-4v-7a6 6 0 0 1 6-6z'/%3E%3Crect width='4' height='12' x='2' y='9'/%3E%3Ccircle cx='4' cy='4' r='2'/%3E%3C/svg%3E");
         }
+
+        .info-author-link-article::before {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23111827' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z'/%3E%3Cpath d='M14 2v4a2 2 0 0 0 2 2h4'/%3E%3Cpath d='M10 9H8'/%3E%3Cpath d='M16 13H8'/%3E%3Cpath d='M16 17H8'/%3E%3C/svg%3E");
+        }
+
+        .info-author-link-doi::before {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23111827' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='20' height='5' x='2' y='3' rx='1'/%3E%3Cpath d='M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8'/%3E%3Cpath d='M10 12h4'/%3E%3C/svg%3E");
+        }
+
+        .info-author-publication {
+            color: #a8320f;
+            font-weight: 700;
+            text-decoration: none;
+        }
+
+        .info-author-publication:hover { text-decoration: underline; }
 
         .back-btn-container { margin-top: 2rem; display: flex; justify-content: center; }
 
@@ -3735,9 +3759,14 @@ def run_info_page() -> None:
         f'<span class="info-author-secondary">{html.escape(t("info_author_affiliation"))}</span>'
         f'<span class="info-author-secondary">{html.escape(t("info_author_year"))}</span><br>'
         f'<span class="info-author-secondary"><strong>{html.escape(t("info_supervisors_label"))}:</strong> '
-        f'{html.escape(t("info_supervisors_names"))}</span></p>'
+        f'{html.escape(t("info_supervisors_names"))}</span>'
+        f'<span class="info-author-secondary"><strong>{html.escape(t("info_publication_label"))}:</strong> '
+        f'<a class="info-author-publication" href="{ARTICLE_DOI_URL}" target="_blank" rel="noopener noreferrer">'
+        '<em>Results in Engineering</em>, 32 (2026), 113369</a></span></p>'
         '</div>'
         '<div class="info-author-links">'
+        f'<a class="info-author-link info-author-link-article" href="{ARTICLE_DOI_URL}" target="_blank" rel="noopener noreferrer"><span>{html.escape(t("info_author_article"))}</span></a>'
+        f'<a class="info-author-link info-author-link-doi" href="{SOFTWARE_DOI_URL}" target="_blank" rel="noopener noreferrer"><span>{html.escape(t("info_author_software"))}</span></a>'
         f'<a class="info-author-link info-author-link-github" href="https://github.com/Silvestre17" target="_blank" rel="noopener noreferrer"><span>{html.escape(t("info_author_github"))}</span></a>'
         f'<a class="info-author-link info-author-link-linkedin" href="https://www.linkedin.com/in/andrefgsilvestre/" target="_blank" rel="noopener noreferrer"><span>{html.escape(t("info_author_linkedin"))}</span></a>'
         '</div>'
