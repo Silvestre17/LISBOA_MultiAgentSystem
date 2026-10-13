@@ -2277,10 +2277,11 @@ _LIVE_DEPARTURE_LINE_RE = re.compile(
 
 
 def _drop_live_departures_for_another_day(response: str, user_message: str, language: str) -> str:
-    """Remove live departures from an answer about a trip on another day.
+    """Remove live departures from an answer about a trip on another day or later tonight.
 
-    Next departures and waiting times describe leaving now; for "tomorrow" or
-    "on Saturday" they would read as that day's timetable. Remove complete CP
+    Next departures and waiting times describe leaving now; for "tomorrow",
+    "on Saturday" or, asked before the evening, "tonight", they would read as
+    that trip's timetable. Remove complete CP
     departure sections and today's date/status/count, including clock times in
     the direct answer. The route (lines, stops, transfers, in-vehicle time) stays.
 
@@ -2296,11 +2297,12 @@ def _drop_live_departures_for_another_day(response: str, user_message: str, lang
     from agent.planning.brief import PlanBrief, plan_date
     from tools.utils import lisbon_now
 
-    match = _ANOTHER_DAY_PHRASE_RE.search(_normalize_token(user_message))
-    if not match or not response:
-        return response
-    today = lisbon_now().date()
-    if plan_date(PlanBrief(day=match.group(0)), today) == today:
+    normalized_message = _normalize_token(user_message)
+    match = _ANOTHER_DAY_PHRASE_RE.search(normalized_message)
+    now = lisbon_now()
+    another_day = bool(match) and plan_date(PlanBrief(day=match.group(0)), now.date()) != now.date()
+    later_tonight = bool(re.search(r"\b(?:a noite|esta noite|tonight|at night)\b", normalized_message)) and now.hour < 18
+    if not response or not (another_day or later_tonight):
         return response
     is_cp_response = bool(
         re.search(
@@ -2356,9 +2358,9 @@ def _drop_live_departures_for_another_day(response: str, user_message: str, lang
     if cleaned == response:
         return response
     note = (
-        "ℹ️ As partidas em tempo real só valem para sair agora; para o dia da viagem, confirma os horários no operador."
+        "ℹ️ As partidas em tempo real só valem para sair agora; para o momento da viagem, confirma os horários no operador."
         if language == "pt"
-        else "ℹ️ Live departures only apply to leaving now; for the day of the trip, check the timetable with the operator."
+        else "ℹ️ Live departures only apply to leaving now; for the time of your trip, check the timetable with the operator."
     )
     if note in cleaned:
         return cleaned.strip()
@@ -2533,7 +2535,10 @@ def _is_generic_public_transport_route_query(user_message: str) -> bool:
             r"\b(?:como\s+(?:posso\s+)?(?:ir|vou|chego)|quero\s+(?:ir|chegar)|"
             r"preciso\s+(?:de\s+)?ir|qual\s+(?:e\s+)?(?:a\s+)?(?:melhor|forma)|"
             r"how\s+(?:do\s+i\s+)?(?:get|go)|want\s+to\s+(?:go|get)|"
-            r"best\s+(?:way|option))\b",
+            r"best\s+(?:way|option)|"
+            # "Que alternativas tenho de A para B?" names no mode either.
+            r"(?:que|quais)\s+(?:sao\s+)?(?:as\s+)?(?:alternativas|opcoes)|"
+            r"(?:what|which)\s+(?:are\s+)?(?:my\s+|the\s+)?(?:options|alternatives))\b",
             normalized,
             flags=re.IGNORECASE,
         )
@@ -3072,7 +3077,14 @@ def _build_cp_bridge_for_partial_metro_route(
             except Exception:
                 raw_direct_train = ""
             if raw_direct_train and not _tool_result_indicates_no_match(raw_direct_train):
-                train_block = _strip_transport_source_lines(raw_direct_train)
+                # Same rendering as an explicit train request: direct answer
+                # with the next departure, trip summary, next departures.
+                train_block = _format_cp_trip_result(
+                    {"origin": origin_station, "destination": destination_station},
+                    _strip_transport_source_lines(raw_direct_train).strip(),
+                    language,
+                    user_message,
+                )
                 train_block = normalize_cp_no_more_trains_message(train_block, language).strip()
                 timestamp = datetime.now().strftime("%H:%M")
                 if language == "pt":
@@ -3718,6 +3730,10 @@ def _format_carris_mode_section_markdown(
     if not entries:
         return ""
 
+    def ranking_details(entry: Dict[str, Any]) -> List[str]:
+        """Return the entry details without their list marker ("- Tempo em veículo: ~34 min")."""
+        return [re.sub(r"^[-*]\s+", "", str(detail).strip()) for detail in entry.get("details", [])]
+
     def has_confirmed_departures(entry: Dict[str, Any]) -> bool:
         """Return whether the route entry includes concrete departure evidence."""
         return any(
@@ -3726,12 +3742,12 @@ def _format_carris_mode_section_markdown(
                 str(detail).strip(),
                 flags=re.IGNORECASE,
             )
-            for detail in entry.get("details", [])
+            for detail in ranking_details(entry)
         )
 
     def travel_minutes(entry: Dict[str, Any]) -> Optional[int]:
         """Extract the estimated in-vehicle travel time for route ranking."""
-        for detail in entry.get("details", []):
+        for detail in ranking_details(entry):
             match = re.match(
                 r"^(?:(?:Tempo em ve[íi]culo|Tempo estimado|Estimated travel time|Vehicle time):\s*)?"
                 r"~\s*(\d+)\s*min(?:\s*travel)?$",
@@ -3746,7 +3762,7 @@ def _format_carris_mode_section_markdown(
         """Return minutes until the first listed departure, or a large fallback."""
         now = datetime.now()
         current_minutes = now.hour * 60 + now.minute
-        for detail in entry.get("details", []):
+        for detail in ranking_details(entry):
             next_match = re.match(
                 r"^(?:\*\*)?(?:Next|Pr[oó]ximas partidas)(?:\*\*)?:\s*(?P<body>.+)$",
                 str(detail).strip(),
@@ -3766,7 +3782,7 @@ def _format_carris_mode_section_markdown(
 
     def walk_minutes(entry: Dict[str, Any], which: str) -> Optional[int]:
         """Return the initial or final walk of a route entry, in minutes."""
-        for detail in entry.get("details", []):
+        for detail in ranking_details(entry):
             match = re.match(
                 rf"^(?:{which})\s*:\s*~?\s*(\d+)\s*min",
                 str(detail).strip(),
@@ -3783,7 +3799,7 @@ def _format_carris_mode_section_markdown(
         stop with a sooner departure beats a shorter ride from a farther stop.
         """
         departures: List[str] = []
-        for detail in entry.get("details", []):
+        for detail in ranking_details(entry):
             departures = departures or departure_times(str(detail))
         total = door_to_door_minutes(
             walk_minutes(entry, "Caminhada inicial|Initial walk"),
@@ -3983,6 +3999,9 @@ def _direct_line_from_recommended_option(recommended_option: str, language: str)
     Returns:
         ``(direct_line, remaining_lines)``: the direct answer naming the line,
         stops, time, and next departure, and the summary lines left to show.
+        The departures and real-time lines are dropped from the remainder: the
+        direct answer gives the next departure and the route card below lists
+        every departure with its real-time label.
     """
     first_line, _, rest = recommended_option.partition("\n")
     best = re.sub(
@@ -4001,7 +4020,11 @@ def _direct_line_from_recommended_option(recommended_option: str, language: str)
         # Only a clock time: "no departures confirmed today" is not a time.
         if re.match(r"\d{1,2}:\d{2}\b", first_departure):
             sentence += f"; o próximo sai às {first_departure}" if is_pt else f"; the next one leaves at {first_departure}"
-    return f"✅ **{label}:** {sentence.rstrip('.')}.", rest.strip()
+    remaining = "\n".join(
+        line for line in rest.splitlines()
+        if not re.search(r"\*\*(?:Próximas partidas|Next departures|Tempo real|Real-time):\*\*", line)
+    ).strip()
+    return f"✅ **{label}:** {sentence.rstrip('.')}.", remaining
 
 
 def _count_formatted_carris_options(markdown: str) -> int:
@@ -4269,7 +4292,11 @@ def _build_carris_surface_route_response(
         scheduled_from=requested_clock,
     )
     if recommended and not alternative_requested:
-        parts.extend(["", recommended])
+        # The best option (and its next departure) is the direct answer.
+        direct_line, remaining = _direct_line_from_recommended_option(recommended, language)
+        parts[2] = direct_line
+        if remaining:
+            parts.extend(["", remaining])
     parts.extend(["", "---", ""])
     if tram_markdown:
         parts.extend([
@@ -5706,19 +5733,11 @@ def _query_mentions_specific_route_mode(user_message: str) -> bool:
 
 def _minutes_until_clock_time(clock_text: Optional[str]) -> Optional[int]:
     """Returns minutes from now until the next HH:MM clock occurrence."""
-    if not clock_text:
+    if not clock_text or _minutes_from_clock(clock_text) is None:
         return None
+    from tools.carris_api import _minutes_until_clock_time as minutes_until_clock
 
-    target_minutes = _minutes_from_clock(clock_text)
-    if target_minutes is None:
-        return None
-
-    now = datetime.now()
-    current_minutes = now.hour * 60 + now.minute
-    diff = target_minutes - current_minutes
-    if diff < 0:
-        diff += 24 * 60
-    return diff
+    return minutes_until_clock(clock_text)
 
 
 def _build_train_landmark_option(
@@ -6012,6 +6031,10 @@ def _parse_metro_wait_request(user_message: str) -> Optional[Dict[str, Any]]:
         r"when is the next metro at\s+(?P<station>.+?)\s+(?:towards|toward|to|direction)\s+(?P<direction>.+?)(?:[\?\!\.,;]|$)",
         r"pr[oó]ximo metro\s+(?:na|em)\s+(?P<station>.+?)\s+(?:sentido|dire[cç][aã]o)\s+(?P<direction>.+?)(?:[\?\!\.,;]|$)",
         r"quando passa o pr[oó]ximo metro\s+(?:na|em)\s+(?P<station>.+?)\s+(?:sentido|dire[cç][aã]o)\s+(?P<direction>.+?)(?:[\?\!\.,;]|$)",
+        # "Quando passa o metro no Rossio para Santa Apolónia?"
+        r"(?:quando\s+(?:passa|sai|chega|vem)\s+o\s+(?:pr[oó]ximo\s+)?metro|pr[oó]ximo\s+metro)\s+(?:no|na|em|do|da|de)\s+"
+        r"(?P<station>.+?)\s+(?:para|at[eé]|sentido|dire[cç][aã]o)\s+(?:o\s+|a\s+)?(?P<direction>.+?)(?:[\?\!\.,;]|$)",
+        r"next metro from\s+(?P<station>.+?)\s+(?:to|towards|toward)\s+(?P<direction>.+?)(?:[\?\!\.,;]|$)",
     ]
     for pattern in direction_patterns:
         match = re.search(pattern, query, flags=re.IGNORECASE)
@@ -6027,6 +6050,7 @@ def _parse_metro_wait_request(user_message: str) -> Optional[Dict[str, Any]]:
         r"when is the next metro at\s+(?P<station>.+?)(?:[\?\!\.,;]|$)",
         r"metro wait time at\s+(?P<station>.+?)(?:[\?\!\.,;]|$)",
         r"pr[oó]ximo metro\s+(?:na|em)\s+(?P<station>.+?)(?:[\?\!\.,;]|$)",
+        r"quando\s+(?:passa|sai|chega|vem)\s+o\s+(?:pr[oó]ximo\s+)?metro\s+(?:no|na|em)\s+(?P<station>.+?)(?:[\?\!\.,;]|$)",
         r"pr[oó]ximo metro\s+(?P<station>.+?)(?:[\?\!\.,;]|$)",
     ]
     for pattern in station_only_patterns:
@@ -6595,6 +6619,21 @@ def _build_deterministic_metro_wait_response(
     if future_planning:
         return _build_future_metro_wait_limit_response(station, direction, language)
 
+    # "Rossio para Santa Apolónia" crosses lines: no train runs in that
+    # direction from the station, so answer it as a route with its transfer.
+    if station and direction and not _get_line_id_between(station, direction):
+        route_message = (
+            f"Quero ir de metro de {station} para {direction}"
+            if language == "pt"
+            else f"I want to go by metro from {station} to {direction}"
+        )
+        route_response = _build_deterministic_metro_route_response(
+            user_message=route_message,
+            context=f"User language: {language}",
+        )
+        if route_response:
+            return route_response
+
     from tools.metrolisboa_api import get_metro_line_wait_times, get_metro_wait_time, get_station_lines
 
     if requested_line_id and not direction:
@@ -6652,16 +6691,52 @@ def _build_deterministic_metro_wait_response(
 
     waits_section = "🗓️ **Próximos Metros** (tempo real):" if language == "pt" else "🗓️ **Next Metros** (real time):"
     title = (
-        f"🚇 **{station}** → **{direction}**"
+        f"### 🚇 **{station} → {direction}**"
         if direction
         else (
-            f"🚇 **Próximo metro em {station}**"
+            f"### 🚇 **Próximo metro em {station}**"
             if language == "pt"
-            else f"🚇 **Next metro at {station}**"
+            else f"### 🚇 **Next metro at {station}**"
         )
     )
 
     response_lines = [title]
+    blocks = [] if direction else _parse_metro_wait_blocks(wait_result)
+    direction_lines = _build_metro_wait_lines([(station, direction)], language) if direction else []
+    first_arrivals = [
+        (block["direction"], _localize_wait_times(block["times"][0], language))
+        for block in blocks
+        if block.get("times")
+    ]
+    direction_wait = re.search(
+        r"\*\*⏱️ (?:Próximo Metro em|Next Metro in):\*\*\s*([^|\n]+)", direction_lines[0] if direction_lines else ""
+    )
+    if direction_wait:
+        first_arrivals = [(direction, direction_wait.group(1).strip())]
+    if first_arrivals:
+        # The first arrival per direction answers "when is the next metro";
+        # beyond two directions the soonest one is named and the list follows.
+        def wait_seconds(wait: str) -> int:
+            minutes = re.search(r"(\d+)\s*min", wait)
+            seconds = re.search(r"(\d+)\s*s\b", wait)
+            return (int(minutes.group(1)) * 60 if minutes else 0) + (int(seconds.group(1)) if seconds else 0)
+
+        named = sorted(first_arrivals, key=lambda item: wait_seconds(item[1]))
+        if language == "pt":
+            parts = [
+                f"**agora** (direção {name})" if not re.search(r"\d", wait) else f"dentro de **{wait}** (direção {name})"
+                for name, wait in named[:2]
+            ]
+            arrivals = " e ".join(parts) if len(named) <= 2 else f"{parts[0]}; as outras direções estão abaixo"
+            direct = f"✅ **Resposta direta:** o próximo metro em **{station}** chega {arrivals}."
+        else:
+            parts = [
+                f"**now** (to {name})" if not re.search(r"\d", wait) else f"in **{wait}** (to {name})"
+                for name, wait in named[:2]
+            ]
+            arrivals = " and ".join(parts) if len(named) <= 2 else f"{parts[0]}; the other directions are listed below"
+            direct = f"✅ **Direct answer:** the next metro at **{station}** arrives {arrivals}."
+        response_lines.extend(["", direct, "", "---", ""])
     if status_requested or line_ids:
         state_lines = _build_route_state_lines(line_ids, language)
         response_lines.append(_metro_state_title(state_lines, language))
@@ -6670,9 +6745,8 @@ def _build_deterministic_metro_wait_response(
 
     response_lines.append(waits_section)
     if direction:
-        response_lines.extend(_build_metro_wait_lines([(station, direction)], language))
+        response_lines.extend(direction_lines)
     else:
-        blocks = _parse_metro_wait_blocks(wait_result)
         station_label = "Estação" if language == "pt" else "Station"
         direction_label = "Direção" if language == "pt" else "Direction"
         next_label = "⏱️ Próximo Metro em:" if language == "pt" else "⏱️ Next Metro in:"
@@ -8369,6 +8443,252 @@ def _build_deterministic_transport_tool_call(user_message: str) -> Optional[AIMe
             return _build_tool_call(spec["name"], spec["args"])
 
     return None
+
+
+def _format_cp_trip_result(tool_args: Dict[str, Any], cleaned_result: str, language: str, user_message: str = "") -> str:
+    """Render a ``plan_train_trip`` result as the CP route answer.
+
+    Args:
+        tool_args: Origin and destination passed to the tool.
+        cleaned_result: Tool output without surrounding whitespace.
+        language: Output language.
+        user_message: The user's question.
+
+    Returns:
+        The formatted CP answer, or a grounded limitation when no train matches.
+    """
+    origin = str(tool_args.get("origin") or "Origem" if language == "pt" else tool_args.get("origin") or "Origin").strip()
+    destination = str(
+        tool_args.get("destination") or "Destino" if language == "pt" else tool_args.get("destination") or "Destination"
+    ).strip()
+    title_match = re.search(
+        r"^###\s*🚆\s*\*\*Comboio:\s*(?P<origin>.+?)\s*→\s*(?P<destination>.+?)\*\*",
+        cleaned_result,
+        flags=re.IGNORECASE | re.MULTILINE,
+    )
+    if title_match:
+        origin = title_match.group("origin").strip()
+        destination = title_match.group("destination").strip()
+
+    if _tool_result_indicates_no_match(cleaned_result):
+        if language == "pt":
+            return "\n".join(
+                [
+                    f"### 🚆 **{origin} → {destination}**",
+                    "",
+                    "✅ **Resposta direta:** não consegui confirmar uma ligação direta de **CP suburbano/AML** para este par de estações nos dados disponíveis.",
+                    "",
+                    "---",
+                    "",
+                    "💡 **O que isto significa:**",
+                    "- 🚆 A cobertura confirmada do LISBOA para CP centra-se em comboios suburbanos/AML.",
+                    "- 🧭 Serviços de longo curso ou destinos fora da AML ficam fora do âmbito confirmado.",
+                ]
+            ).strip()
+        return "\n".join(
+            [
+                f"### 🚆 **{origin} → {destination}**",
+                "",
+                "✅ **Direct answer:** I could not confirm a direct **CP suburban/AML** train connection for this station pair with the available data.",
+                "",
+                "---",
+                "",
+                "💡 **What this means:**",
+                "- 🚆 LISBOA's confirmed CP coverage is focused on suburban/AML rail data.",
+                "- 🧭 Long-distance services or destinations outside the AML are outside the confirmed scope.",
+            ]
+        ).strip()
+
+    no_more_match = re.search(
+        r"No more trains today from \*\*(?P<origin>.+?)\*\* to \*\*(?P<destination>.+?)\*\*"
+        r".*?There are (?P<count>\d+) trips on other days",
+        cleaned_result,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if no_more_match:
+        origin = no_more_match.group("origin").strip() or origin
+        destination = no_more_match.group("destination").strip() or destination
+        other_days_count = no_more_match.group("count").strip()
+        line_value = _infer_cp_line_label_for_pair(origin, destination, language)
+        if language == "pt":
+            lines = [
+                f"### 🚆 **{origin} → {destination}**",
+                "",
+                "✅ **Resposta direta:** não há mais comboios confirmados hoje para esta ligação CP suburbana/AML.",
+                "",
+                "---",
+                "",
+                "### 📊 **Resumo da viagem**",
+                "- 🚆 **Operador:** CP suburbano/AML",
+            ]
+            if line_value:
+                lines.append(f"- 🛤️ **Linha:** {line_value}")
+            lines.extend(
+                [
+                    "- ⏰ **Próximo comboio hoje:** sem mais partidas confirmadas",
+                    f"- 📊 **Serviço noutros dias:** {other_days_count} viagens nos dados de horário disponíveis",
+                    "",
+                    "💡 **Antes de sair:** confirma no site/app da CP a primeira partida disponível para a data em que vais viajar.",
+                ]
+            )
+            return "\n".join(lines).strip()
+
+        lines = [
+            f"### 🚆 **{origin} → {destination}**",
+            "",
+            "✅ **Direct answer:** there are no more confirmed trains today for this CP suburban/AML connection.",
+            "",
+            "---",
+            "",
+            "### 📊 **Trip summary**",
+            "- 🚆 **Operator:** CP suburban/AML",
+        ]
+        if line_value:
+            lines.append(f"- 🛤️ **Line:** {line_value}")
+        lines.extend(
+            [
+                "- ⏰ **Next train today:** no more confirmed departures",
+                f"- 📊 **Service on other days:** {other_days_count} trips in the available timetable data",
+                "",
+                "💡 **Before leaving:** check the CP website/app for the first available departure on your travel date.",
+            ]
+        )
+        return "\n".join(lines).strip()
+
+    field_values: dict[str, str] = {}
+    for raw_line in cleaned_result.splitlines():
+        stripped = raw_line.strip()
+        field_match = re.match(
+            r"^-\s*(?:[^\w*]+\s*)?\*\*(?P<label>[^:*]+):\*\*\s*(?P<value>.+)$",
+            stripped,
+        )
+        if field_match:
+            label = _normalize_token(field_match.group("label"))
+            field_values[label] = field_match.group("value").strip().rstrip(".")
+
+    departures: list[tuple[str, str, str, str]] = []
+    more_departures = ""
+    for raw_line in cleaned_result.splitlines():
+        stripped = raw_line.strip()
+        departure_match = re.search(
+            r"\*\*(?P<departure>\d{2}:\d{2})\*\*\s*→\s*(?P<arrival>\d{2}:\d{2})\s*\((?P<duration>[^)]+)\)(?:\s*—\s*(?P<route>.+))?",
+            stripped,
+        )
+        if departure_match:
+            departures.append(
+                (
+                    departure_match.group("departure"),
+                    departure_match.group("arrival"),
+                    departure_match.group("duration").strip(),
+                    (departure_match.group("route") or "").strip(),
+                )
+            )
+            continue
+        if stripped.startswith("- ..."):
+            more_departures = stripped.lstrip("- ").strip()
+
+    line_value = field_values.get("linha") or field_values.get("linhas")
+    duration_value = field_values.get("duracao") or field_values.get("duração")
+    status_value = field_values.get("estado")
+    remaining_value = field_values.get("partidas restantes hoje")
+    route_noun = "Linhas" if field_values.get("linhas") else "Linha"
+
+    next_departure = departures[0][0] if departures else ""
+    next_arrival = departures[0][1] if departures else ""
+    next_duration = departures[0][2] if departures else ""
+    if status_value and language != "pt":
+        # The CP tool states the live status in Portuguese.
+        status_value = re.sub(
+            r"alguns comboios com \+(\d+) min de atraso", r"some trains running up to \1 min late", status_value
+        )
+        status_value = status_value.replace("comboios a horas no feed em tempo real", "trains on time in the live feed")
+        status_value = status_value.replace("sem dados em tempo real", "no real-time data")
+    if language == "pt":
+        if line_value and next_departure:
+            direct_answer = (
+                f"o próximo comboio da **{line_value}** sai às **{next_departure}** e chega às "
+                f"**{next_arrival}** ({next_duration})"
+            )
+            direct_answer += f"; estado em tempo real: {status_value}." if status_value else "."
+        elif line_value:
+            direct_answer = f"segue de **CP suburbano/AML** pela **{line_value}**."
+        else:
+            direct_answer = "segue pela ligação CP suburbana/AML confirmada nos dados disponíveis."
+
+        lines = [
+            f"### 🚆 **{origin} → {destination}**",
+            "",
+            f"✅ **Resposta direta:** {direct_answer}",
+            "",
+            "---",
+            "",
+            "📊 **Resumo da viagem**",
+            "- 🚆 **Operador:** CP suburbano/AML",
+        ]
+        if line_value:
+            lines.append(f"- 🛤️ **{route_noun}:** {line_value}")
+        if duration_value:
+            lines.append(f"- ⏱️ **Duração:** {duration_value}")
+        if status_value:
+            status_emoji = "🚦" if "atras" in _normalize_token(status_value) else "✅" if "horas" in _normalize_token(status_value) else "ℹ️"
+            lines.append(f"- {status_emoji} **Estado:** {status_value}")
+        if remaining_value:
+            lines.append(f"- 📊 **Partidas restantes hoje:** {remaining_value}")
+        if departures:
+            lines.extend(["", "---", "", "🕐 **Próximas partidas**"])
+            for departure, arrival, duration, route in departures[:3]:
+                suffix = f" — {route}" if route else ""
+                lines.append(f"- **{departure}** → {arrival} ({duration}){suffix}")
+            if more_departures:
+                lines.append(f"- {more_departures}")
+        lines.extend(
+            [
+                "",
+                "💡 **Antes de sair:** confirma a plataforma e a partida no momento da viagem.",
+            ]
+        )
+        return "\n".join(lines).strip()
+
+    if line_value and next_departure:
+        direct_answer = (
+            f"the next **{line_value}** train leaves at **{next_departure}** and arrives at "
+            f"**{next_arrival}** ({next_duration})"
+        )
+        direct_answer += f"; live status: {status_value}." if status_value else "."
+    elif line_value:
+        direct_answer = f"take a **CP suburban/AML** train on **{line_value}**."
+    else:
+        direct_answer = "use the CP suburban/AML connection confirmed in the available data."
+
+    lines = [
+        f"### 🚆 **{origin} → {destination}**",
+        "",
+        f"✅ **Direct answer:** {direct_answer}",
+        "",
+        "---",
+        "",
+        "📊 **Trip summary**",
+        "- 🚆 **Operator:** CP suburban/AML",
+    ]
+    if line_value:
+        english_route_noun = "Lines" if route_noun == "Linhas" else "Line"
+        lines.append(f"- 🛤️ **{english_route_noun}:** {line_value}")
+    if duration_value:
+        lines.append(f"- ⏱️ **Duration:** {duration_value}")
+    if status_value:
+        status_emoji = "🚦" if re.search(r"delay|late|atras", _normalize_token(status_value)) else "✅" if "on time" in status_value.lower() else "ℹ️"
+        lines.append(f"- {status_emoji} **Status:** {status_value}")
+    if remaining_value:
+        lines.append(f"- 📊 **Departures left today:** {remaining_value}")
+    if departures:
+        lines.extend(["", "---", "", "🕐 **Next departures**"])
+        for departure, arrival, duration, route in departures[:3]:
+            suffix = f" — {route}" if route else ""
+            lines.append(f"- **{departure}** → {arrival} ({duration}){suffix}")
+        if more_departures:
+            lines.append(f"- {more_departures}")
+    lines.extend(["", "💡 **Before leaving:** confirm the platform and departure at travel time."])
+    return "\n".join(lines).strip()
 
 
 class TransportAgent(BaseAgent):
@@ -10715,238 +11035,7 @@ class TransportAgent(BaseAgent):
             return _format_all_metro_stations(language=language, user_message=user_message)
 
         if tool_name == "plan_train_trip":
-            origin = str(tool_args.get("origin") or "Origem" if language == "pt" else tool_args.get("origin") or "Origin").strip()
-            destination = str(
-                tool_args.get("destination") or "Destino" if language == "pt" else tool_args.get("destination") or "Destination"
-            ).strip()
-            title_match = re.search(
-                r"^###\s*🚆\s*\*\*Comboio:\s*(?P<origin>.+?)\s*→\s*(?P<destination>.+?)\*\*",
-                cleaned_result,
-                flags=re.IGNORECASE | re.MULTILINE,
-            )
-            if title_match:
-                origin = title_match.group("origin").strip()
-                destination = title_match.group("destination").strip()
-
-            if _tool_result_indicates_no_match(cleaned_result):
-                if language == "pt":
-                    return "\n".join(
-                        [
-                            f"### 🚆 **{origin} → {destination}**",
-                            "",
-                            "✅ **Resposta direta:** não consegui confirmar uma ligação direta de **CP suburbano/AML** para este par de estações nos dados disponíveis.",
-                            "",
-                            "---",
-                            "",
-                            "💡 **O que isto significa:**",
-                            "- 🚆 A cobertura confirmada do LISBOA para CP centra-se em comboios suburbanos/AML.",
-                            "- 🧭 Serviços de longo curso ou destinos fora da AML ficam fora do âmbito confirmado.",
-                        ]
-                    ).strip()
-                return "\n".join(
-                    [
-                        f"### 🚆 **{origin} → {destination}**",
-                        "",
-                        "✅ **Direct answer:** I could not confirm a direct **CP suburban/AML** train connection for this station pair with the available data.",
-                        "",
-                        "---",
-                        "",
-                        "💡 **What this means:**",
-                        "- 🚆 LISBOA's confirmed CP coverage is focused on suburban/AML rail data.",
-                        "- 🧭 Long-distance services or destinations outside the AML are outside the confirmed scope.",
-                    ]
-                ).strip()
-
-            no_more_match = re.search(
-                r"No more trains today from \*\*(?P<origin>.+?)\*\* to \*\*(?P<destination>.+?)\*\*"
-                r".*?There are (?P<count>\d+) trips on other days",
-                cleaned_result,
-                flags=re.IGNORECASE | re.DOTALL,
-            )
-            if no_more_match:
-                origin = no_more_match.group("origin").strip() or origin
-                destination = no_more_match.group("destination").strip() or destination
-                other_days_count = no_more_match.group("count").strip()
-                line_value = _infer_cp_line_label_for_pair(origin, destination, language)
-                if language == "pt":
-                    lines = [
-                        f"### 🚆 **{origin} → {destination}**",
-                        "",
-                        "✅ **Resposta direta:** não há mais comboios confirmados hoje para esta ligação CP suburbana/AML.",
-                        "",
-                        "---",
-                        "",
-                        "### 📊 **Resumo da viagem**",
-                        "- 🚆 **Operador:** CP suburbano/AML",
-                    ]
-                    if line_value:
-                        lines.append(f"- 🛤️ **Linha:** {line_value}")
-                    lines.extend(
-                        [
-                            "- ⏰ **Próximo comboio hoje:** sem mais partidas confirmadas",
-                            f"- 📊 **Serviço noutros dias:** {other_days_count} viagens nos dados de horário disponíveis",
-                            "",
-                            "💡 **Antes de sair:** confirma no site/app da CP a primeira partida disponível para a data em que vais viajar.",
-                        ]
-                    )
-                    return "\n".join(lines).strip()
-
-                lines = [
-                    f"### 🚆 **{origin} → {destination}**",
-                    "",
-                    "✅ **Direct answer:** there are no more confirmed trains today for this CP suburban/AML connection.",
-                    "",
-                    "---",
-                    "",
-                    "### 📊 **Trip summary**",
-                    "- 🚆 **Operator:** CP suburban/AML",
-                ]
-                if line_value:
-                    lines.append(f"- 🛤️ **Line:** {line_value}")
-                lines.extend(
-                    [
-                        "- ⏰ **Next train today:** no more confirmed departures",
-                        f"- 📊 **Service on other days:** {other_days_count} trips in the available timetable data",
-                        "",
-                        "💡 **Before leaving:** check the CP website/app for the first available departure on your travel date.",
-                    ]
-                )
-                return "\n".join(lines).strip()
-
-            field_values: dict[str, str] = {}
-            for raw_line in cleaned_result.splitlines():
-                stripped = raw_line.strip()
-                field_match = re.match(
-                    r"^-\s*(?:[^\w*]+\s*)?\*\*(?P<label>[^:*]+):\*\*\s*(?P<value>.+)$",
-                    stripped,
-                )
-                if field_match:
-                    label = _normalize_token(field_match.group("label"))
-                    field_values[label] = field_match.group("value").strip().rstrip(".")
-
-            departures: list[tuple[str, str, str, str]] = []
-            more_departures = ""
-            for raw_line in cleaned_result.splitlines():
-                stripped = raw_line.strip()
-                departure_match = re.search(
-                    r"\*\*(?P<departure>\d{2}:\d{2})\*\*\s*→\s*(?P<arrival>\d{2}:\d{2})\s*\((?P<duration>[^)]+)\)(?:\s*—\s*(?P<route>.+))?",
-                    stripped,
-                )
-                if departure_match:
-                    departures.append(
-                        (
-                            departure_match.group("departure"),
-                            departure_match.group("arrival"),
-                            departure_match.group("duration").strip(),
-                            (departure_match.group("route") or "").strip(),
-                        )
-                    )
-                    continue
-                if stripped.startswith("- ..."):
-                    more_departures = stripped.lstrip("- ").strip()
-
-            line_value = field_values.get("linha") or field_values.get("linhas")
-            duration_value = field_values.get("duracao") or field_values.get("duração")
-            status_value = field_values.get("estado")
-            remaining_value = field_values.get("partidas restantes hoje")
-            route_noun = "Linhas" if field_values.get("linhas") else "Linha"
-
-            next_departure = departures[0][0] if departures else ""
-            next_arrival = departures[0][1] if departures else ""
-            next_duration = departures[0][2] if departures else ""
-            if status_value and language != "pt":
-                # The CP tool states the live status in Portuguese.
-                status_value = re.sub(
-                    r"alguns comboios com \+(\d+) min de atraso", r"some trains running up to \1 min late", status_value
-                )
-                status_value = status_value.replace("comboios a horas no feed em tempo real", "trains on time in the live feed")
-                status_value = status_value.replace("sem dados em tempo real", "no real-time data")
-            if language == "pt":
-                if line_value and next_departure:
-                    direct_answer = (
-                        f"o próximo comboio da **{line_value}** sai às **{next_departure}** e chega às "
-                        f"**{next_arrival}** ({next_duration})"
-                    )
-                    direct_answer += f"; estado em tempo real: {status_value}." if status_value else "."
-                elif line_value:
-                    direct_answer = f"segue de **CP suburbano/AML** pela **{line_value}**."
-                else:
-                    direct_answer = "segue pela ligação CP suburbana/AML confirmada nos dados disponíveis."
-
-                lines = [
-                    f"### 🚆 **{origin} → {destination}**",
-                    "",
-                    f"✅ **Resposta direta:** {direct_answer}",
-                    "",
-                    "---",
-                    "",
-                    "📊 **Resumo da viagem**",
-                    "- 🚆 **Operador:** CP suburbano/AML",
-                ]
-                if line_value:
-                    lines.append(f"- 🛤️ **{route_noun}:** {line_value}")
-                if duration_value:
-                    lines.append(f"- ⏱️ **Duração:** {duration_value}")
-                if status_value:
-                    status_emoji = "🚦" if "atras" in _normalize_token(status_value) else "✅" if "horas" in _normalize_token(status_value) else "ℹ️"
-                    lines.append(f"- {status_emoji} **Estado:** {status_value}")
-                if remaining_value:
-                    lines.append(f"- 📊 **Partidas restantes hoje:** {remaining_value}")
-                if departures:
-                    lines.extend(["", "---", "", "🕐 **Próximas partidas**"])
-                    for departure, arrival, duration, route in departures[:3]:
-                        suffix = f" — {route}" if route else ""
-                        lines.append(f"- **{departure}** → {arrival} ({duration}){suffix}")
-                    if more_departures:
-                        lines.append(f"- {more_departures}")
-                lines.extend(
-                    [
-                        "",
-                        "💡 **Antes de sair:** confirma a plataforma e a partida no momento da viagem.",
-                    ]
-                )
-                return "\n".join(lines).strip()
-
-            if line_value and next_departure:
-                direct_answer = (
-                    f"the next **{line_value}** train leaves at **{next_departure}** and arrives at "
-                    f"**{next_arrival}** ({next_duration})"
-                )
-                direct_answer += f"; live status: {status_value}." if status_value else "."
-            elif line_value:
-                direct_answer = f"take a **CP suburban/AML** train on **{line_value}**."
-            else:
-                direct_answer = "use the CP suburban/AML connection confirmed in the available data."
-
-            lines = [
-                f"### 🚆 **{origin} → {destination}**",
-                "",
-                f"✅ **Direct answer:** {direct_answer}",
-                "",
-                "---",
-                "",
-                "📊 **Trip summary**",
-                "- 🚆 **Operator:** CP suburban/AML",
-            ]
-            if line_value:
-                english_route_noun = "Lines" if route_noun == "Linhas" else "Line"
-                lines.append(f"- 🛤️ **{english_route_noun}:** {line_value}")
-            if duration_value:
-                lines.append(f"- ⏱️ **Duration:** {duration_value}")
-            if status_value:
-                status_emoji = "🚦" if re.search(r"delay|late|atras", _normalize_token(status_value)) else "✅" if "on time" in status_value.lower() else "ℹ️"
-                lines.append(f"- {status_emoji} **Status:** {status_value}")
-            if remaining_value:
-                lines.append(f"- 📊 **Departures left today:** {remaining_value}")
-            if departures:
-                lines.extend(["", "---", "", "🕐 **Next departures**"])
-                for departure, arrival, duration, route in departures[:3]:
-                    suffix = f" — {route}" if route else ""
-                    lines.append(f"- **{departure}** → {arrival} ({duration}){suffix}")
-                if more_departures:
-                    lines.append(f"- {more_departures}")
-            lines.extend(["", "💡 **Before leaving:** confirm the platform and departure at travel time."])
-            return "\n".join(lines).strip()
+            return _format_cp_trip_result(tool_args, cleaned_result, language, user_message)
 
         if tool_name == "get_metro_status":
             line_name_map = {
@@ -12064,6 +12153,12 @@ class TransportAgent(BaseAgent):
 
         urban_tool = self._get_tool_by_name("carris_find_routes_between")
         frequency_tool = self._get_tool_by_name("carris_get_service_frequency")
+        # Only the bus, tram and no-metro branches below read the Carris Urban
+        # result; a train-only request must not wait for the bus real-time feed.
+        urban_result_needed = any(
+            preferences[key]
+            for key in ("bus_only", "exclude_tram", "exclude_metro", "tram_only", "exclude_bus")
+        )
         urban_result = (
             str(
                 self._invoke_tool(
@@ -12072,7 +12167,7 @@ class TransportAgent(BaseAgent):
                     tool_name="carris_find_routes_between",
                 )
             ).strip()
-            if urban_tool and not metropolitana_only
+            if urban_tool and not metropolitana_only and urban_result_needed
             else ""
         )
 

@@ -102,9 +102,10 @@ CARRIS_RUNTIME_RELEASE_ASSET = "carris_runtime.zip"
 
 # Request timeout
 REQUEST_TIMEOUT = 120  # GTFS download can take time
-REALTIME_TIMEOUT = 25  # Real-time requests (GTFS-RT endpoint can be slow)
-REALTIME_MAX_RETRIES = 3  # Number of retry attempts for GTFS-RT
-REALTIME_RETRY_BACKOFF = 2  # Base backoff in seconds between retries
+REALTIME_TIMEOUT = 6  # GTFS-RT usually answers in under 0.2 s; scheduled times are the fallback
+REALTIME_MAX_RETRIES = 2  # Number of attempts for GTFS-RT
+REALTIME_RETRY_BACKOFF = 1  # Base backoff in seconds between retries
+RECENT_CLOCK_TOLERANCE_MINUTES = 10  # An estimated time this recent counts as "now", not tomorrow
 
 # Cache for GTFS-RT data (avoid excessive API calls)
 _gtfs_rt_cache: Dict[str, Any] = {
@@ -219,7 +220,8 @@ def _minutes_until_clock_time(clock_text: str) -> Optional[int]:
     current_minutes = now.hour * 60 + now.minute
     delta = target_minutes - current_minutes
     if delta < 0:
-        delta += 24 * 60
+        # A time just past is an early or arriving vehicle, not tomorrow's departure.
+        delta = 0 if delta >= -RECENT_CLOCK_TOLERANCE_MINUTES else delta + 24 * 60
     return delta
 
 
@@ -1234,8 +1236,8 @@ def fetch_gtfs_rt_vehicles(use_cache: bool = True) -> List[Dict[str, Any]]:
     """
     Fetches real-time vehicle positions from Carris GTFS-RT feed.
 
-    Implements retry logic with exponential backoff because the Carris
-    GTFS-RT endpoint can be slow or intermittently unavailable.
+    Retries once after a short pause, because the endpoint is occasionally
+    unavailable; callers fall back to scheduled times when it fails.
 
     Args:
         use_cache: Whether to use cached data if available (default: True)
@@ -1267,7 +1269,7 @@ def fetch_gtfs_rt_vehicles(use_cache: bool = True) -> List[Dict[str, Any]]:
             )
             return _gtfs_rt_cache["data"]
 
-    # Retry loop with exponential backoff
+    # Retry loop
     last_error = None
     for attempt in range(1, REALTIME_MAX_RETRIES + 1):
         try:
@@ -1364,7 +1366,7 @@ def fetch_gtfs_rt_vehicles(use_cache: bool = True) -> List[Dict[str, Any]]:
             # Parse errors are not retryable
             break
 
-        # Wait before retrying (exponential backoff)
+        # Short pause before the retry
         if attempt < REALTIME_MAX_RETRIES:
             wait_time = REALTIME_RETRY_BACKOFF * attempt
             logger.info(f"Retrying in {wait_time}s...")
