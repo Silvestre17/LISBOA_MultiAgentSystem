@@ -11,7 +11,6 @@ import logging
 import re
 import unicodedata
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
@@ -37,7 +36,7 @@ if TYPE_CHECKING:
 from agent.agents.base import BaseAgent, parse_json_response
 from agent.planning.brief import plan_brief_from_context, strip_plan_brief_from_context
 from agent.prompts.researcher import get_researcher_prompt
-from agent.utils.langsmith_tracing import traceable
+from agent.utils.langsmith_tracing import ContextThreadPoolExecutor, traceable
 from agent.state import AgentState
 from agent.utils.geographic_scope import (
     extract_aml_municipality_mentions,
@@ -6511,7 +6510,7 @@ class ResearcherAgent(BaseAgent):
                 logger.warning("Planner event search failed: %s", exc)
                 return ""
 
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        with ContextThreadPoolExecutor(max_workers=4) as executor:
             place_futures = [executor.submit(run_places, args) for args in immediate]
             event_future = executor.submit(run_events, event_args) if event_args else None
             place_results = [future.result() for future in place_futures]
@@ -6543,7 +6542,7 @@ class ResearcherAgent(BaseAgent):
                             str(args["query"]),
                         )
                     anchored.append(copy)
-            with ThreadPoolExecutor(max_workers=4) as executor:
+            with ContextThreadPoolExecutor(max_workers=4) as executor:
                 place_results.extend(executor.map(run_places, anchored))
 
         seen_titles: set[str] = set()
@@ -6693,7 +6692,7 @@ class ResearcherAgent(BaseAgent):
         if not names:
             return []
         area = brief.activity_areas[0] if brief.activity_areas else ""
-        with ThreadPoolExecutor(max_workers=min(4, len(names))) as executor:
+        with ContextThreadPoolExecutor(max_workers=min(4, len(names))) as executor:
             found = list(executor.map(lambda name: wikipedia_place_card(name, language, area), names))
         return [self._wikipedia_evidence_card(card, name, language) for name, card in zip(names, found) if card]
 
@@ -7083,7 +7082,7 @@ class ResearcherAgent(BaseAgent):
 
         if not gaps:
             return []
-        with ThreadPoolExecutor(max_workers=min(4, len(gaps))) as executor:
+        with ContextThreadPoolExecutor(max_workers=min(4, len(gaps))) as executor:
             found = list(executor.map(lookup, gaps))
         cards: List[str] = []
         for card in (card for group in found for card in group):

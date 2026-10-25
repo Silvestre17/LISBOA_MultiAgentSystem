@@ -32,7 +32,7 @@ from agent.utils.geographic_scope import (
     build_geographic_out_of_scope_response,
     route_mentions_outside_aml,
 )
-from agent.utils.langsmith_tracing import traceable
+from agent.utils.langsmith_tracing import ContextThreadPoolExecutor, traceable
 from agent.state import AgentState
 from langgraph.prebuilt import ToolNode
 from agent.utils.response_formatter import (
@@ -8794,8 +8794,6 @@ class TransportAgent(BaseAgent):
         Returns:
             One Markdown movement line per leg, in the same order.
         """
-        from concurrent.futures import ThreadPoolExecutor
-
         from agent.planning.legs import (
             MAX_FALLBACK_WALK_KM,
             WALKABLE_DISTANCE_KM,
@@ -8938,7 +8936,7 @@ class TransportAgent(BaseAgent):
 
         if not legs:
             return []
-        with ThreadPoolExecutor(max_workers=min(4, len(legs))) as executor:
+        with ContextThreadPoolExecutor(max_workers=min(4, len(legs))) as executor:
             return list(executor.map(resolve, legs))
 
     def _metropolitana_bus_result_with_fallback(
