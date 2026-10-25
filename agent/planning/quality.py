@@ -12,7 +12,7 @@ import json
 import re
 from datetime import timedelta
 from itertools import permutations
-from typing import Any, List, Sequence
+from typing import Any, Dict, List, Sequence
 
 from agent.planning.brief import (
     WEEKDAY_NAMES,
@@ -1363,9 +1363,8 @@ def _short_day_issue(draft: PlanDraft, matched: List[tuple[Any, Any]], evidence:
     chosen = {id(card) for _block, card in matched}
     # "2 museums" stays two museums: a type whose count is reached is not suggested.
     full_kinds = [
-        component.kind for component in brief.components
-        if component.count
-        and sum(1 for _block, card in matched if card_matches_kind(card, component.kind)) >= component.count
+        kind for kind, count in requested_counts(brief).items()
+        if count and sum(1 for _block, card in matched if card_matches_kind(card, kind)) >= count
     ]
     unused = [
         card for card in evidence.cards
@@ -1773,6 +1772,51 @@ def untimed_event_notes(draft: PlanDraft, evidence: EvidenceBundle, language: st
     return notes
 
 
+def requested_counts(brief: Any) -> Dict[str, int]:
+    """Return the requested number of stops per component kind (0: no number given).
+
+    The brief may list a kind more than once (a "monument" for each named
+    monument); the counts add up.
+    """
+    counts: Dict[str, int] = {}
+    for component in brief.components:
+        counts[component.kind] = counts.get(component.kind, 0) + int(component.count or 0)
+    return counts
+
+
+def closed_named_place_notes(draft: PlanDraft, evidence: EvidenceBundle, brief: Any, language: str) -> List[str]:
+    """Return a note for each place the user named that is closed all day and left out.
+
+    The review moves the plan to an open card; the user still has to hear why
+    the place they asked for is not in it.
+
+    Args:
+        draft: Final plan.
+        evidence: Evidence cards.
+        brief: Planning brief, for the named places and the plan's day.
+        language: Output language.
+
+    Returns:
+        One note per such place.
+    """
+    today = lisbon_now().date()
+    day = plan_date(brief, today)
+    used = {id(match_block_to_card(block.title, evidence)) for block in draft.blocks}
+    existing = normalize_text(" ".join(draft.limitations))
+    notes: List[str] = []
+    for place in brief.named_places:
+        card = match_block_to_card(place, evidence)
+        if card is None or id(card) in used or normalize_text(card.title) in existing:
+            continue
+        if closed_all_day(hours_for_plan_day(str((card.fields or {}).get("Hours", "")), day, today)):
+            notes.append(
+                f"{card.title} está fechado nesse dia, por isso não entrou no plano."
+                if language == "pt"
+                else f"{card.title} is closed that day, so it is not in the plan."
+            )
+    return notes
+
+
 def unmet_component_notes(draft: PlanDraft, evidence: EvidenceBundle, brief: Any, language: str) -> List[str]:
     """Return one limitation per requested stop type the final plan does not cover.
 
@@ -1789,6 +1833,24 @@ def unmet_component_notes(draft: PlanDraft, evidence: EvidenceBundle, brief: Any
     area = brief.activity_areas[0] if brief.activity_areas else ""
     notes: List[str] = []
     for component in brief.components:
+        if component.kind == "event":
+            # Every card "matches" the event kind; only an event card is one.
+            if any(getattr(card, "kind", "") == "event" for card in matched) or re.search(r"\bevent", existing):
+                continue
+            found_events = any(getattr(card, "kind", "") == "event" for card in evidence.cards)
+            if is_pt:
+                notes.append(
+                    "O plano não inclui nenhum evento: os eventos encontrados para esse dia não encaixavam no horário nem na zona do plano."
+                    if found_events
+                    else "O plano não inclui nenhum evento: não encontrei eventos confirmados para esse dia."
+                )
+            else:
+                notes.append(
+                    "The plan includes no event: the events found for that day did not fit the plan's times or area."
+                    if found_events
+                    else "The plan includes no event: no confirmed event was found for that day."
+                )
+            continue
         labels = _COMPONENT_LABELS.get(component.kind)
         if not labels:
             continue
@@ -1950,24 +2012,24 @@ def review_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, brief: Any) ->
         if issue:
             repairable.append(issue)
 
-    for component in brief.components:
-        if component.kind in {"attraction", "walk", "event"}:
+    for kind, count in requested_counts(brief).items():
+        if kind in {"attraction", "walk", "event"}:
             continue
-        found = sum(1 for block, card in matched if card_matches_kind(card, component.kind))
-        required = component.count or 1
+        found = sum(1 for block, card in matched if card_matches_kind(card, kind))
+        required = count or 1
         cards_available = [
             card for card in evidence.cards
             if getattr(card, "kind", "") not in {"weather", "transport"}
-            and card_matches_kind(card, component.kind)
+            and card_matches_kind(card, kind)
         ]
         if found < required and len(cards_available) > found:
             repairable.append(
-                f"the request asks for {required} {component.kind} stop(s) but the plan has {found}; add one from the matching cards"
+                f"the request asks for {required} {kind} stop(s) but the plan has {found}; add one from the matching cards"
             )
-        if component.count and component.kind not in {"lunch", "dinner", "restaurant"} and found > component.count:
+        if count and kind not in {"lunch", "dinner", "restaurant"} and found > count:
             repairable.append(
-                f"the request asks for {component.count} {component.kind} stop(s) but the plan has {found}; "
-                f"keep {component.count} and use other kinds of stops for the rest of the time"
+                f"the request asks for {count} {kind} stop(s) but the plan has {found}; "
+                f"keep {count} and use other kinds of stops for the rest of the time"
             )
 
     for component in brief.components:

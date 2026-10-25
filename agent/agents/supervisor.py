@@ -117,8 +117,9 @@ class SupervisorAgent(BaseAgent):
             conversation: Condensed earlier turns and the latest itinerary.
 
         Returns:
-            ``kind``, ``request`` and ``answer``, or an empty dict when the model
-            answer cannot be read; the caller then keeps the message as written.
+            ``kind``, ``request`` and ``answer`` (the recalled fact or the
+            clarifying question), or an empty dict when the model answer cannot
+            be read; the caller then keeps the message as written.
         """
         messages = build_follow_up_messages(user_message, language, conversation)
         try:

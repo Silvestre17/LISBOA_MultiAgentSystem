@@ -54,6 +54,7 @@ from agent.planning.compose import (
 )
 from agent.planning.prompts import build_brief_plan_messages
 from agent.planning.quality import (
+    closed_named_place_notes,
     match_block_to_card,
     review_plan_draft,
     snap_events_to_sessions,
@@ -13987,11 +13988,18 @@ class PlannerAgent(BaseAgent):
         draft = order_blocks_by_time(snap_events_to_sessions(draft, evidence))
         draft = clean_plan_notes(draft, brief, language)
         draft = drop_closed_stops(draft, evidence, brief, language)
+        if not draft.blocks:
+            return render_plan_markdown(draft, sources=plan_sources(draft, evidence), language=language, infer_missing_walks=False).strip()
         draft = resolve_plan_legs(draft, evidence, brief, self.leg_resolver, language)
         draft = label_meal_stops(draft, evidence, language)
-        # Checked on the final plan: a requested stop type still missing after
-        # the repair round is stated, not silently dropped.
-        for note in [*unmet_component_notes(draft, evidence, brief, language), *untimed_event_notes(draft, evidence, language)]:
+        # Checked on the final plan: a named place closed that day, or a
+        # requested stop type still missing after the repair round, is stated,
+        # not silently dropped.
+        for note in [
+            *closed_named_place_notes(draft, evidence, brief, language),
+            *unmet_component_notes(draft, evidence, brief, language),
+            *untimed_event_notes(draft, evidence, language),
+        ]:
             if note not in draft.limitations:
                 draft.limitations.append(note)
         if any(component.kind == "event" for component in brief.components):

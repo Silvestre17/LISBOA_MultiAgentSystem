@@ -2268,12 +2268,21 @@ def get_bus_next_departures(
     response += f"📍 {line_info.get('long_name') or 'route details unavailable in the live feed'}\n"
     response += "=" * 50 + "\n\n"
 
-    pattern_id = patterns[0]
-    pattern_url = f"{CARRIS_PATTERNS_URL}/{pattern_id}"
-    pattern_data = fetch_json_with_retry(pattern_url)
+    # A line has one pattern per direction (and variant); a stop is served by
+    # the pattern whose path contains it, not necessarily the first one.
+    pattern_data = None
+    for pattern_id in patterns:
+        candidate = fetch_json_with_retry(f"{CARRIS_PATTERNS_URL}/{pattern_id}")
+        if not candidate:
+            continue
+        if pattern_data is None:
+            pattern_data = candidate
+        if not stop_id or any(s.get("stop", {}).get("id") == stop_id for s in candidate.get("path", [])):
+            pattern_data = candidate
+            break
 
     if not pattern_data:
-        return f"❌ Failed to fetch schedule for pattern {pattern_id}."
+        return f"❌ Failed to fetch the schedule for line {line_id}."
 
     headsign = pattern_data.get("headsign") or "direction unavailable"
     trips = pattern_data.get("trips", [])

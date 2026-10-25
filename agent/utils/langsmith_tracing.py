@@ -797,9 +797,29 @@ ContextThreadPoolExecutor = LANGSMITH_STATUS["ContextThreadPoolExecutor"]
 tracing_context = LANGSMITH_STATUS["tracing_context"]
 
 
+@contextmanager
+def deadline_executor(max_workers: int):
+    """Yield a tracing-aware thread pool whose exit does not wait for late tasks.
+
+    A ``with ThreadPoolExecutor()`` block joins every thread on exit, so a
+    timeout on ``as_completed`` stops collecting but not waiting. Here a task
+    still running at exit is left to finish in the background and its result
+    is ignored; tasks not yet started are cancelled.
+
+    Args:
+        max_workers: Number of worker threads.
+    """
+    executor = ContextThreadPoolExecutor(max_workers=max_workers)
+    try:
+        yield executor
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
 __all__ = [
     "annotate_current_run",
     "ContextThreadPoolExecutor",
+    "deadline_executor",
     "flush_langsmith_and_confirm",
     "is_langsmith_sync_flush_enabled",
     "LANGSMITH_AVAILABLE",

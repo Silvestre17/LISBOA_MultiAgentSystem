@@ -106,12 +106,18 @@ REALTIME_TIMEOUT = 6  # GTFS-RT usually answers in under 0.2 s; scheduled times 
 REALTIME_MAX_RETRIES = 2  # Number of attempts for GTFS-RT
 REALTIME_RETRY_BACKOFF = 1  # Base backoff in seconds between retries
 RECENT_CLOCK_TOLERANCE_MINUTES = 10  # An estimated time this recent counts as "now", not tomorrow
+# A vehicle snapshot older than this says nothing about where the vehicle is
+# now; scheduled times are used instead.
+REALTIME_STALE_MAX_AGE = 300
+# Tables without which a GTFS build cannot answer a departure question.
+_REQUIRED_GTFS_TABLES = {"routes", "stops", "trips", "stop_times"}
 
 # Cache for GTFS-RT data (avoid excessive API calls)
 _gtfs_rt_cache: Dict[str, Any] = {
     "data": None,
     "timestamp": 0,
-    "ttl": 30,  # Cache for 30 seconds
+    "ttl": 30,  # Cache for 30 seconds; also the pause after a failed fetch
+    "failed_at": 0,
 }
 _gtfs_rt_feed_meta: Dict[str, Any] = {
     "source": "uninitialized",
@@ -612,6 +618,7 @@ class CarrisGTFSManager:
             with contextlib.suppress(FileNotFoundError):
                 os.remove(stale_path)
 
+        conn = None
         try:
             conn = sqlite3.connect(build_path)
             cursor = conn.cursor()
@@ -774,32 +781,26 @@ class CarrisGTFSManager:
 
             for table_name in import_order:
                 filename = f"{table_name}.txt"
+                if filename not in z.namelist():
+                    if table_name in _REQUIRED_GTFS_TABLES:
+                        raise ValueError(f"{filename} is missing from the GTFS feed")
+                    logger.info(f"  {filename}: not found in ZIP (optional)")
+                    continue
 
-                try:
-                    with z.open(filename) as f:
-                        content = f.read().decode("utf-8-sig")
-                        reader = csv.DictReader(content.splitlines())
-                        rows = list(reader)
+                # An import error aborts the build: a feed with stops but
+                # without its trips or times must not replace a working database.
+                with z.open(filename) as f:
+                    content = f.read().decode("utf-8-sig")
+                    rows = list(csv.DictReader(content.splitlines()))
 
-                        if rows:
-                            cols = list(rows[0].keys())
-                            placeholders = ",".join(["?" for _ in cols])
-                            sql = f"INSERT INTO {table_name} ({','.join(cols)}) VALUES ({placeholders})"
-
-                            data = [
-                                [row.get(c, "") or None for c in cols] for row in rows
-                            ]
-                            cursor.executemany(sql, data)
-
-                    logger.info(f"  {filename}: {len(rows):,} rows")
-
-                except KeyError:
-                    if table_name == "shapes":
-                        logger.info(f"  {filename}: not found in ZIP (optional)")
-                    else:
-                        logger.warning(f"  {filename}: not found in ZIP")
-                except Exception as e:
-                    logger.error(f"  {filename}: error - {e}")
+                if not rows and table_name in _REQUIRED_GTFS_TABLES:
+                    raise ValueError(f"{filename} is empty")
+                if rows:
+                    cols = list(rows[0].keys())
+                    placeholders = ",".join(["?" for _ in cols])
+                    sql = f"INSERT INTO {table_name} ({','.join(cols)}) VALUES ({placeholders})"
+                    cursor.executemany(sql, [[row.get(c, "") or None for c in cols] for row in rows])
+                logger.info(f"  {filename}: {len(rows):,} rows")
 
             conn.commit()
 
@@ -859,12 +860,8 @@ class CarrisGTFSManager:
 
         except Exception as e:
             logger.error(f"Failed to convert GTFS to SQLite: {e}")
-            with contextlib.suppress(OSError):
-                os.remove(build_path)
-            return False
-
-        if not self._database_file_has_stops(build_path):
-            logger.error("Carris GTFS conversion produced an empty stops table")
+            if conn is not None:
+                conn.close()  # Windows cannot remove a file that is still open
             with contextlib.suppress(OSError):
                 os.remove(build_path)
             return False
@@ -1312,6 +1309,10 @@ def fetch_gtfs_rt_vehicles(use_cache: bool = True) -> List[Dict[str, Any]]:
                 vehicle_count=len(_gtfs_rt_cache["data"] or []),
             )
             return _gtfs_rt_cache["data"]
+    if use_cache and now - _gtfs_rt_cache["failed_at"] < _gtfs_rt_cache["ttl"]:
+        # The feed just failed: the other route options of this answer do not
+        # wait for the same retries again.
+        return _gtfs_rt_fallback(now, _gtfs_rt_feed_meta.get("last_error"))
 
     # Retry loop
     last_error = None
@@ -1421,8 +1422,23 @@ def fetch_gtfs_rt_vehicles(use_cache: bool = True) -> List[Dict[str, Any]]:
         f"GTFS-RT: All {REALTIME_MAX_RETRIES} attempts failed. "
         f"Last error: {last_error}"
     )
-    if _gtfs_rt_cache["data"]:
-        cache_age = now - _gtfs_rt_cache["timestamp"]
+    _gtfs_rt_cache["failed_at"] = time.time()
+    return _gtfs_rt_fallback(now, last_error)
+
+
+def _gtfs_rt_fallback(now: float, last_error: Optional[str]) -> List[Dict]:
+    """Return the last vehicle snapshot while it is recent enough, else no vehicles.
+
+    Args:
+        now: Current ``time.time()`` value.
+        last_error: Why the live feed could not be read.
+
+    Returns:
+        The cached vehicles, or ``[]`` when there are none or they are older
+        than ``REALTIME_STALE_MAX_AGE`` (arrivals then use scheduled times).
+    """
+    cache_age = now - _gtfs_rt_cache["timestamp"]
+    if _gtfs_rt_cache["data"] and cache_age <= REALTIME_STALE_MAX_AGE:
         logger.info(f"Using cached GTFS-RT data (age: {cache_age:.0f}s)")
         generated_at = None
         if _gtfs_rt_feed_meta.get("generated_at"):

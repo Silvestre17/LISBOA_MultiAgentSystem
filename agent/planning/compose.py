@@ -31,6 +31,7 @@ from agent.planning.quality import (
     match_block_to_card,
     minutes_until_closing,
     open_at,
+    requested_counts,
     strip_block_time,
     without_public_cards,
 )
@@ -266,13 +267,14 @@ def align_schedule_with_legs(
     today: date,
     end_minutes: Optional[int] = None,
     language: str,
-) -> None:
+) -> List[tuple[PlanBlock, str]]:
     """Push stop times later when the stay plus the leg does not fit.
 
     A stop never moves earlier, and an event keeps its fixed start. After a
     stop moves, it is checked again: outside the hours its card gives for
-    the plan's day, or after the end time the user gave, it gets a note. A
-    stop that no longer ends before a following event gets a note too.
+    the plan's day, or after the end time the user gave, it gets a note and
+    is returned, so the caller can leave it out. A stop that no longer ends
+    before a following event gets a note too.
 
     Args:
         blocks: One day's blocks, in visiting order.
@@ -282,8 +284,13 @@ def align_schedule_with_legs(
         today: Current Lisbon date (card hours without a weekday are today's).
         end_minutes: The user's end time in minutes after midnight, if given.
         language: Output language.
+
+    Returns:
+        Each stop that moved past its closing time or the user's end time,
+        with the note that explains why it was left out.
     """
     is_pt = language == "pt"
+    late: List[tuple[PlanBlock, str]] = []
     for block in blocks:
         start = _block_start_minutes(block)
         if start is not None and start % 5:
@@ -316,13 +323,19 @@ def align_schedule_with_legs(
             continue
         _set_block_start(current, earliest)
         raw_hours = str((getattr(card, "fields", {}) or {}).get("Hours", "")) if card is not None else ""
+        name = strip_block_time(current.title)
         if open_at(hours_for_plan_day(raw_hours, plan_day, today), earliest) is False:
             add_note(
                 current,
                 "A esta hora pode já estar fechado; confirma o horário." if is_pt
                 else "It may be closed at this time; check the hours.",
             )
-        if end_minutes is not None and earliest >= end_minutes:
+            late.append((
+                current,
+                f"{name} ficou fora do plano: com as deslocações, chegarias depois de fechar." if is_pt
+                else f"{name} was left out: with the travel time, you would arrive after it closes.",
+            ))
+        elif end_minutes is not None and earliest >= end_minutes:
             end_clock = f"{end_minutes // 60:02d}:{end_minutes % 60:02d}"
             add_note(
                 current,
@@ -330,6 +343,11 @@ def align_schedule_with_legs(
                 if is_pt
                 else f"With the travel time, this stop starts after the {end_clock} you gave; skip it if you run out of time.",
             )
+            late.append((
+                current,
+                f"{name} ficou fora do plano: com as deslocações, começaria depois das {end_clock} que indicaste." if is_pt
+                else f"{name} was left out: with the travel time, it would start after the {end_clock} you gave.",
+            ))
 
     # A museum reached at 16:30 that closes at 17:00 leaves half a visit.
     for block in blocks:
@@ -348,6 +366,7 @@ def align_schedule_with_legs(
                 f"Fecha às {clock}, pouco depois de chegares; vai mais cedo se quiseres visitar com calma." if is_pt
                 else f"It closes at {clock}, soon after you arrive; go earlier for an unhurried visit.",
             )
+    return late
 
 
 # Shortest useful visit before closing (minutes).
@@ -466,6 +485,7 @@ def resolve_plan_legs(
     language: str,
     *,
     meals_moved: bool = False,
+    late_dropped: bool = False,
 ) -> PlanDraft:
     """Add the movement between the chosen stops, as confirmed by the Transport worker.
 
@@ -486,6 +506,8 @@ def resolve_plan_legs(
         language: Output language.
         meals_moved: Whether a meal already swapped places with the stop
             before it (the legs are then resolved once more, not again).
+        late_dropped: Whether stops pushed past their closing or the end
+            time were already left out (likewise resolved only once more).
 
     Returns:
         The same draft with its movement lines merged.
@@ -574,9 +596,10 @@ def resolve_plan_legs(
     snapshot = [(block, block.title, list(block.limitations)) for block in draft.blocks]
     if day_groups and model_first_line in movement and first_day == today:
         _start_after_origin_trip(day_groups[0], model_first_line, last_mile)
+    late: List[tuple[PlanBlock, str]] = []
     for day_index, blocks in enumerate(day_groups):
         day_number = max(1, int(getattr(blocks[0], "day", 0) or 1))
-        align_schedule_with_legs(
+        late += align_schedule_with_legs(
             blocks,
             stop_leg_minutes.get(day_index, []),
             evidence,
@@ -599,7 +622,25 @@ def resolve_plan_legs(
             draft.blocks[i], draft.blocks[j] = meal, stop
             if stop_start is not None:
                 _set_block_start(meal, stop_start)
-        return resolve_plan_legs(draft, evidence, brief, resolver, language, meals_moved=True)
+        return resolve_plan_legs(draft, evidence, brief, resolver, language, meals_moved=True, late_dropped=late_dropped)
+    if late and not late_dropped:
+        # A stop the real travel times push past its closing or the user's end
+        # time is left out, and the legs are worked out again without it.
+        for block, title, limitations in snapshot:
+            block.title, block.limitations = title, limitations
+        draft.movement_logic = model_movement
+        late_ids = {id(block) for block, _note in late}
+        draft.blocks = [block for block in draft.blocks if id(block) not in late_ids]
+        forget_dropped_stops(
+            draft,
+            [strip_block_time(block.title) for block, _note in late],
+            [match_block_to_card(block.title, evidence) for block, _note in late],
+            evidence,
+            brief,
+            language,
+        )
+        draft.limitations.extend(note for _block, note in late if note not in draft.limitations)
+        return resolve_plan_legs(draft, evidence, brief, resolver, language, meals_moved=meals_moved, late_dropped=True)
 
     _drop_stale_mode_notes(draft)
     if unresolved_return:
@@ -1162,6 +1203,17 @@ def drop_closed_stops(draft: PlanDraft, evidence: EvidenceBundle, brief: Optiona
             continue
         kept.append(block)
     if not kept:
+        # Every stop is closed at its time: say so instead of publishing closed doors.
+        names = ", ".join(dropped[:-1]) + (" e " if language == "pt" else " and ") + dropped[-1] if len(dropped) > 1 else dropped[0]
+        draft.blocks, draft.movement_logic, draft.tips = [], [], []
+        if language == "pt":
+            closed = "estão fechados" if len(dropped) > 1 else "está fechado"
+            draft.direct_answer = f"Não consigo montar este plano: {names} {closed} a essa hora no dia do plano."
+            draft.limitations = ["Experimenta outro dia ou outra hora, ou pede alternativas abertas na mesma zona."]
+        else:
+            closed = "are" if len(dropped) > 1 else "is"
+            draft.direct_answer = f"I cannot build this plan: {names} {closed} closed at that time on the day of the plan."
+            draft.limitations = ["Try another day or time, or ask for open alternatives in the same area."]
         return draft
     if not dropped:
         # A swapped meal stop (its notes and direct answer already updated)
@@ -1414,31 +1466,35 @@ def drop_extra_counted_stops(draft: PlanDraft, evidence: EvidenceBundle, brief: 
     Returns:
         The same draft without the extra stops.
     """
-    counted = [
-        component for component in brief.components
-        if component.count and component.kind not in {"lunch", "dinner", "restaurant"}
-    ]
-    if not counted:
+    limits = {
+        kind: count for kind, count in requested_counts(brief).items()
+        if count and kind not in {"lunch", "dinner", "restaurant"}
+    }
+    if not limits:
         return draft
     kinds = {component.kind for component in brief.components}
-    # A named place is asked for in its own right, whatever count its type got.
+    # A named place is asked for in its own right and takes its place in the
+    # count first: "two museums, including B" keeps B and one other museum.
     named_cards = {id(card) for card in (match_block_to_card(place, evidence) for place in brief.named_places) if card is not None}
     seen: Dict[str, int] = {}
+    for block in draft.blocks:
+        card = match_block_to_card(block.title, evidence)
+        if card is not None and id(card) in named_cards:
+            for kind in limits:
+                if card_matches_kind(card, kind):
+                    seen[kind] = seen.get(kind, 0) + 1
     kept: List[PlanBlock] = []
     for block in draft.blocks:
         card = match_block_to_card(block.title, evidence)
-        if card is None:
+        if card is None or id(card) in named_cards:
             kept.append(block)
             continue
-        over = [
-            component.kind for component in counted
-            if card_matches_kind(card, component.kind) and seen.get(component.kind, 0) >= component.count
-        ]
-        if over and id(card) not in named_cards and not any(card_matches_kind(card, kind) for kind in kinds - set(over)):
+        over = [kind for kind, count in limits.items() if card_matches_kind(card, kind) and seen.get(kind, 0) >= count]
+        if over and not any(card_matches_kind(card, kind) for kind in kinds - set(over)):
             continue
-        for component in counted:
-            if card_matches_kind(card, component.kind):
-                seen[component.kind] = seen.get(component.kind, 0) + 1
+        for kind in limits:
+            if card_matches_kind(card, kind):
+                seen[kind] = seen.get(kind, 0) + 1
         kept.append(block)
     if kept:
         draft.blocks = kept

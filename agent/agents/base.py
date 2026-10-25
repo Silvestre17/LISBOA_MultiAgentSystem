@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from agent.utils.langsmith_tracing import ContextThreadPoolExecutor
+from agent.utils.langsmith_tracing import deadline_executor
 
 try:
     from config import Config
@@ -1002,7 +1002,7 @@ class BaseAgent:
         # Limit workers to number of tools
         num_workers = min(max_workers, len(tool_calls))
 
-        with ContextThreadPoolExecutor(max_workers=num_workers) as executor:
+        with deadline_executor(max_workers=num_workers) as executor:
             future_to_tool = {
                 executor.submit(execute_single_tool, tc): tc
                 for tc in tool_calls

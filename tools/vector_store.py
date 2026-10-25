@@ -1268,6 +1268,17 @@ Examples:
                 max_docs=args.max_docs,
             )
 
+            failed = [
+                name for name, stats in result.items()
+                if isinstance(stats, dict) and stats.get("status") == "error"
+            ]
+            if failed:
+                # A failed collection must not be published as a complete database.
+                print(
+                    f"\n\033[1;31m❌ Exiting with code 1 (failed: {', '.join(failed)})\033[0m",
+                    flush=True,
+                )
+                sys.exit(1)
             if result.get("has_more_work"):
                 print(
                     "\n\033[1;33m⚠️  Exiting with code 2 (More work pending)\033[0m",

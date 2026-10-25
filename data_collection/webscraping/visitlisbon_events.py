@@ -296,7 +296,7 @@ def get_event_urls_from_page(session, page_number, base_url):
         base_url (str): The base URL.
 
     Returns:
-        list: List of event URLs. If error, returns empty list.
+        list: List of event URLs, or None when the page could not be read.
     """
     list_url = f"{base_url}?page={page_number}"
     event_urls = []
@@ -318,6 +318,7 @@ def get_event_urls_from_page(session, page_number, base_url):
 
     except Exception as e:
         logging.error(f"Error fetching page {page_number}: {e}")
+        return None
 
     return event_urls
 
@@ -621,12 +622,16 @@ def main():
 
     # 2. Scrape URLs
     all_urls = set()
+    failed_pages = 0
     with requests.Session() as session:
         total_pages = get_total_pages(session, base_url)
         logging.info("Harvesting URLs...")
 
         for page in tqdm(range(1, total_pages + 1), desc="Pages", mininterval=5):
             urls = get_event_urls_from_page(session, page, base_url)
+            if urls is None:
+                failed_pages += 1
+                continue
             all_urls.update(urls)
 
     logging.info(f"Total events found online: {len(all_urls)}")
@@ -654,6 +659,12 @@ def main():
     unchanged_urls = set()
 
     final_list = []
+    if failed_pages:
+        # A listing page that failed hides its events: an unseen event is kept,
+        # not removed, until a run reads every page.
+        logging.warning(f"{failed_pages} listing page(s) failed; keeping {len(removed_urls)} unseen events.")
+        final_list = [existing_events[url] for url in removed_urls]
+        removed_urls = set()
 
     with requests.Session() as session:
         # A. New

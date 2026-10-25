@@ -192,7 +192,7 @@ You read Lisbon itinerary requests and return ONE JSON object. No prose, no Mark
 Fields:
 - "origin": where the user starts (the place after "starting from", "from", "partindo de", "saindo de", "a partir de", "a começar no", "parto do", "estou em", "estou no/na", "I'm at", "I'm in", or the hotel/base area). Clean place name only, without the transport mode (write "Cais do Sodré", never "Cais do Sodré by train"). When the request gives both a start point and the first stop of the visit ("a partir do Rossio, começando a visita pelo Padrão dos Descobrimentos"), the start point is the origin and the first stop goes first in "named_places". Empty string if not given.
 - "areas": list of the neighbourhoods, districts, or municipalities where the visits happen, in the order given (e.g. ["Chiado", "Bairro Alto"], ["Belém"], ["Cascais"]). Never put the start point here unless the visits also happen there. Use [] when the plan is city-wide ("in Lisbon", "central Lisbon").
-- "named_places": specific venues, landmarks, or complexes the user wants to visit (e.g. ["Jerónimos Monastery"], ["Oceanário"], ["Boca do Inferno"]); [] if none. A venue that also sets the place of the plan ("an afternoon at LX Factory", "a manhã no Oceanário") goes here, and its neighbourhood goes in "areas" when you know it (LX Factory -> Alcântara). Do not repeat a named place in "areas".
+- "named_places": specific venues, landmarks, or complexes the user wants to visit (e.g. ["Jerónimos Monastery"], ["Oceanário"], ["Boca do Inferno"]); [] if none. Write each name as the request writes it, without translating it ("Padrão dos Descobrimentos" stays "Padrão dos Descobrimentos"). A venue that also sets the place of the plan ("an afternoon at LX Factory", "a manhã no Oceanário") goes here, and its neighbourhood goes in "areas" when you know it (LX Factory -> Alcântara). Do not repeat a named place in "areas".
 - "day": "today", "tomorrow", "this weekend", a weekday, or a date, as stated; "" if not stated.
 - "time_window": "morning", "afternoon", "evening", "sunset", "night", "full day", "half day", "N hours", or "N days"; "" if not stated. A plan for a whole day that names no part of it ("plan my day tomorrow", "faz-me um plano para amanhã em Lisboa", "o que fazer no sábado") is "full day"; a single visit with a day ("visit the Oceanário tomorrow") stays "". "meio dia" / "roteiro de meio dia" / "half a day" is "half day" (about four hours), not noon; "ao meio-dia" / "at noon" is start_time "12:00". When the user gives a duration and a part of the day, keep both ("duas horas de manhã" -> "2 hours morning", "3 hours this afternoon" -> "3 hours afternoon").
 - "start_time", "end_time": "HH:MM" only when the user gives a clock time; else "".
@@ -719,14 +719,13 @@ def plan_brief_event_request(brief: PlanBrief, language: str, today: Optional[da
         query = f"{detail} events in {area or 'Lisbon'}".strip()
     args: Dict[str, Any] = {"query": query, "max_results": 5, "language": language}
     day = normalize_text(brief.day)
-    if re.search(r"weekend|fim de semana|sabado|domingo|saturday|sunday", day):
+    if re.search(r"weekend|fim de semana", day):
         args["date_filter"] = "this weekend"
-    elif re.search(r"tomorrow|amanha", day):
-        args["date_filter"] = "tomorrow"
-    elif re.search(r"today|hoje|tonight|esta noite", day):
-        args["date_filter"] = "today"
     elif re.search(r"week|semana", day):
         args["date_filter"] = "this week"
+    elif day and today is not None:
+        # One day ("Saturday", "amanhã", "12/11"): the events of that date.
+        args["date_filter"] = plan_date(brief, today).isoformat()
     return args
 
 
@@ -774,6 +773,26 @@ WEEKDAY_NAMES = (
     ("saturday", "sabado"),
     ("sunday", "domingo"),
 )
+MONTH_NAMES = (
+    ("january", "janeiro"),
+    ("february", "fevereiro"),
+    ("march", "marco"),
+    ("april", "abril"),
+    ("may", "maio"),
+    ("june", "junho"),
+    ("july", "julho"),
+    ("august", "agosto"),
+    ("september", "setembro"),
+    ("october", "outubro"),
+    ("november", "novembro"),
+    ("december", "dezembro"),
+)
+MONTH_NAMES_RE = "|".join(name for names in MONTH_NAMES for name in names)
+
+
+def _month_number(name: str) -> int:
+    """Return the month number (1-12) of a folded English or Portuguese month name."""
+    return next(index for index, names in enumerate(MONTH_NAMES, start=1) if name in names)
 
 
 def plan_date(brief: Optional[PlanBrief], today: date) -> date:
@@ -785,7 +804,8 @@ def plan_date(brief: Optional[PlanBrief], today: date) -> date:
 
     Returns:
         ``today`` unless the brief names another day (tomorrow, a weekday,
-        the weekend, or a DD/MM or ISO date).
+        the weekend, a date such as "12/11", "12/11/2027", "1 de novembro",
+        "November 1", or an ISO date). A date without a year is the next one.
     """
     day = normalize_text(brief.day if brief else "")
     if not day or re.search(r"\b(?:today|hoje|tonight|esta noite|now|agora)\b", day):
@@ -795,13 +815,23 @@ def plan_date(brief: Optional[PlanBrief], today: date) -> date:
     if re.search(r"\b(?:tomorrow|amanha)\b", day):
         return today + timedelta(days=1)
     iso = re.search(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", day)
-    short = re.search(r"\b(\d{1,2})[/-](\d{1,2})\b", day)
+    numeric = re.search(r"\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{4}))?\b", day)
+    day_month = re.search(rf"\b(\d{{1,2}})(?:\s+de)?\s+({MONTH_NAMES_RE})\b(?:\s+(?:de\s+)?(\d{{4}}))?", day)
+    month_day = re.search(rf"\b({MONTH_NAMES_RE})\s+(\d{{1,2}})\b(?:,?\s+(\d{{4}}))?", day)
     try:
         if iso:
             return date(int(iso.group(1)), int(iso.group(2)), int(iso.group(3)))
-        if short:
-            candidate = date(today.year, int(short.group(2)), int(short.group(1)))
-            return candidate if candidate >= today else date(today.year + 1, candidate.month, candidate.day)
+        if numeric:
+            day_number, month, year = int(numeric.group(1)), int(numeric.group(2)), numeric.group(3)
+        elif day_month:
+            day_number, month, year = int(day_month.group(1)), _month_number(day_month.group(2)), day_month.group(3)
+        elif month_day:
+            day_number, month, year = int(month_day.group(2)), _month_number(month_day.group(1)), month_day.group(3)
+        else:
+            day_number = 0
+        if day_number:
+            candidate = date(int(year or today.year), month, day_number)
+            return candidate if year or candidate >= today else candidate.replace(year=today.year + 1)
     except ValueError:
         return today
     if re.search(r"weekend|fim de semana", day):

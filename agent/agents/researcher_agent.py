@@ -110,6 +110,13 @@ _NAMED_PLACE_NOT_FOUND_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A type the user rules out ("sem museus", "not museums") is not a category hint.
+_EXCLUDED_TYPE_RE = re.compile(
+    r"\b(?:sem|exceto|excepto|menos|n[aã]o\s+(?:sejam|quero|incluas?|mostres?)|without|except|excluding|not|no)\s+"
+    r"(?:(?:os|as|o|a|the|any)\s+)?\w+",
+    re.IGNORECASE,
+)
+
 _RESEARCHER_FOOD_INTENT_RE = re.compile(
     r"\b(?:restaurant|restaurante|restaurants|restaurantes|food|comida|comer|cuisine|cozinha|"
     r"gastronom\w*|tradicional|traditional|almoco|almocar|almoço|almoçar|lunch|jantar|dinner|"
@@ -1748,7 +1755,7 @@ class ResearcherAgent(BaseAgent):
         Returns all possible category matches so callers can avoid over-filtering when
         a query asks for multiple types (for example one museum + one viewpoint).
         """
-        query = (user_message or "").lower()
+        query = _EXCLUDED_TYPE_RE.sub(" ", (user_message or "").lower())
         signals: List[str] = []
 
         if any(term in query for term in ["museum", "museu", "monument", "monumento"]):

@@ -10124,7 +10124,7 @@ _PHONE_PT_RE = re.compile(r"(?<!\d)(\+?351)\s*(\d{3})\s*(\d{3})\s*(\d{3})(?!\d)"
 _BOLD_TIME_SPACE_AFTER_RE = re.compile(r"(\d{1,2}):\s+(\d{2})")
 _BOLD_TIME_SPACE_BEFORE_RE = re.compile(r"(\d{1,2})\s+:(\d{2})")
 _ADDRESS_LINE_RE = re.compile(
-    r"(^|\n)(\s*[-*]?\s*)(📍\s*\*\*(?:Morada|Address|Location|Localiza(?:ç|c)[ãa]o|Endere[çc]o)\s*:?\s*\*\*:?\s*)(.+?)(?=\n|$)",
+    r"(^|\n)(\s*[-*]?\s*)(📍\s*\*\*(?:Morada|Address|Location|Localiza(?:ç|c)[ãa]o|Endere[çc]o)\s*:?\s*\*\*:?[ \t]*)(.+?)(?=\n|$)",
     re.IGNORECASE,
 )
 _COORDINATE_PAIR_RE = re.compile(

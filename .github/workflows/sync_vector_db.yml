@@ -349,7 +349,8 @@ jobs:
           fi
 
           # Build base sync command
-          SYNC_CMD="python tools/vector_store.py --no-gpu --max-docs $MAX_DOCS"
+          BASE_SYNC_CMD="python tools/vector_store.py --no-gpu --max-docs $MAX_DOCS"
+          SYNC_CMD="$BASE_SYNC_CMD"
 
           if [ "${{ github.event.inputs.rebuild_events }}" == "true" ]; then
             SYNC_CMD="$SYNC_CMD --rebuild-events"
@@ -380,6 +381,9 @@ jobs:
             $SYNC_CMD
             EXIT_CODE=$?
             set -e
+            # A rebuild flag deletes the collection, so only the first batch
+            # carries it; the next batches continue from what it indexed.
+            SYNC_CMD="$BASE_SYNC_CMD"
 
             COMMIT_MSG="Vector DB Sync: $(date +'%Y-%m-%d %H:%M') [batch-$i]"
             if [ "${{ steps.check-changes.outputs.events_changed }}" -gt 0 ]; then
@@ -398,6 +402,10 @@ jobs:
             # Handle different exit codes (including SIGTERM = 143)
             if [ $EXIT_CODE -eq 0 ]; then
               publish_vector_db_asset "$COMMIT_MSG [complete]" "$VECTOR_DB_RELEASE_ASSET" "$VECTOR_DB_MANIFEST_ASSET"
+              # The next run restores the staging asset first; once complete it is stale.
+              for staging_asset in "$VECTOR_DB_STAGING_ASSET" "$VECTOR_DB_STAGING_MANIFEST_ASSET"; do
+                gh release delete-asset "$VECTOR_DB_RELEASE_TAG" "$staging_asset" --repo "$GITHUB_REPOSITORY" --yes || true
+              done
               echo "✅ Sync complete (all documents processed)"
               break
             elif [ $EXIT_CODE -eq 2 ]; then

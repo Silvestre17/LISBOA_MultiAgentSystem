@@ -84,6 +84,8 @@ CP_RUNTIME_RELEASE_ASSET = "cp_runtime.zip"
 # Cache settings
 CACHE_EXPIRATION_HOURS = 1  # Real-time cache
 GTFS_REFRESH_DAYS = 1  # Check for GTFS updates daily
+# Files without which a GTFS build cannot answer a departure question.
+_REQUIRED_GTFS_FILES = ("routes.txt", "stops.txt", "trips.txt", "stop_times.txt")
 REQUEST_TIMEOUT = 15
 MAX_RETRIES = 3
 BACKOFF_FACTOR = 2
@@ -589,22 +591,23 @@ class CPGTFSManager:
                     'shapes.txt': self._insert_shapes,
                 }
 
+                # An import error aborts the build (the except below keeps the
+                # current database): a feed with stops but without its trips
+                # or times must not replace a working one.
                 for filename, insert_func in gtfs_files.items():
-                    if filename in zf.namelist():
-                        logger.info(f"  Processing {filename}...")
-                        try:
-                            with zf.open(filename) as f:
-                                reader = csv.DictReader(
-                                    io.TextIOWrapper(f, encoding='utf-8-sig')
-                                )
-                                insert_func(cursor, reader)
-                        except Exception as e:
-                            logger.warning(f"  Error processing {filename}: {e}")
-                    else:
-                        if filename == "shapes.txt":
-                            logger.info("  shapes.txt not found in GTFS (optional)")
-                        else:
-                            logger.warning(f"  {filename} not found in GTFS")
+                    if filename not in zf.namelist():
+                        if filename in _REQUIRED_GTFS_FILES:
+                            raise ValueError(f"{filename} is missing from the GTFS feed")
+                        logger.info(f"  {filename} not found in GTFS (optional)")
+                        continue
+                    logger.info(f"  Processing {filename}...")
+                    with zf.open(filename) as f:
+                        insert_func(cursor, csv.DictReader(io.TextIOWrapper(f, encoding='utf-8-sig')))
+
+            for filename in _REQUIRED_GTFS_FILES:
+                table = filename.removesuffix(".txt")
+                if cursor.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone() is None:
+                    raise ValueError(f"{filename} has no rows")
 
             # Create indexes for fast queries
             self._create_indexes(cursor)
@@ -2129,7 +2132,7 @@ def plan_train_trip(origin: str, destination: str) -> str:
         route_delay_mins = 0
         for train in aml_trains:
             train_headsign = train.get('destination', {}).get('designation', '')
-            if dest_name.lower() in train_headsign.lower() or train_headsign.lower() in dest_name.lower():
+            if train_headsign and (dest_name.lower() in train_headsign.lower() or train_headsign.lower() in dest_name.lower()):
                 delay = train.get('delay') or 0
                 delay_mins = delay // 60 if delay else 0
                 train_number = train.get('trainNumber', '')

@@ -2932,7 +2932,8 @@ def _load_events_json() -> List[Dict[str, Any]]:
     try:
         with open(Config.PATH_VISIT_LISBOA_EVENTS, 'r', encoding='utf-8') as f:
             return json.load(f)
-    except Exception:
+    except (OSError, ValueError) as exc:
+        logger.error("VisitLisboa events catalogue could not be read: %s", exc)
         return []
 
 
@@ -2941,7 +2942,8 @@ def _load_places_json() -> List[Dict[str, Any]]:
     try:
         with open(Config.PATH_VISIT_LISBOA_PLACES, 'r', encoding='utf-8') as f:
             return json.load(f)
-    except Exception:
+    except (OSError, ValueError) as exc:
+        logger.error("VisitLisboa places catalogue could not be read: %s", exc)
         return []
 
 
@@ -2967,6 +2969,9 @@ def _get_place_by_url(url: str) -> Optional[Dict[str, Any]]:
         with _places_cache_lock:
             if _places_cache is None:
                 places = _load_places_json()
+                if not places:
+                    # An unreadable catalogue is tried again, not cached as empty.
+                    return None
                 _places_cache = {p.get('url', ''): p for p in places if p.get('url')}
 
     return _places_cache.get(url)
@@ -5568,10 +5573,11 @@ def search_cultural_events(
                 event for event in undated_candidates
                 if _event_within_requested_geography(event, query)
             ]
-            if lisbon_city_events:
-                events_data = lisbon_city_events
-                undated_candidates = lisbon_city_undated
-                logger.info("After Lisbon-city scope filter: %d events", len(events_data))
+            # Applied even when nothing is left: events outside Lisbon would
+            # break the restriction the user gave.
+            events_data = lisbon_city_events
+            undated_candidates = lisbon_city_undated
+            logger.info("After Lisbon-city scope filter: %d events", len(events_data))
 
         exact_lookup_not_found_intro: Optional[str] = None
         if not events_data and specific_lookup_phrase:

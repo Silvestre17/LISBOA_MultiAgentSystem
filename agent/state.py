@@ -83,7 +83,7 @@ class AgentState(TypedDict):
     """
     Main state schema for the Lisbon Urban Assistant agent.
 
-    This state is passed through the LangGraph workflow and contains
+    This state is kept by the orchestrator in agent/graph.py and contains
     all context needed for personalized responses.
 
     Attributes:

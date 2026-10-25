@@ -37,6 +37,7 @@ from agent.utils.langsmith_tracing import (
     LANGSMITH_AVAILABLE,
     ContextThreadPoolExecutor,
     annotate_current_run,
+    deadline_executor,
     get_langsmith_request_tracking_status,
     traceable,
 )
@@ -173,6 +174,8 @@ _MAX_CONVERSATION_HISTORY_MESSAGES = 60
 _WORKER_BATCH_TIMEOUT_S = 120
 # Earlier messages (three exchanges) the follow-up interpreter reads.
 _FOLLOW_UP_DIGEST_MESSAGES = 6
+# Older user messages listed before them, for constraints given long ago.
+_FOLLOW_UP_OLDER_REQUESTS = 8
 # Card fields that do not help resolve a reference to an earlier answer.
 _CONTEXT_NOISE_FIELD_RE = re.compile(
     r"\*\*(?:Telefone|Phone|Email|Website|Avalia[cç][aã]o|Rating|Bilhetes|Tickets|Mais detalhes|"
@@ -1619,7 +1622,9 @@ class MultiAgentAssistant:
         folded = cls._fold_context_text(message)
         if not folded:
             return False
-        return bool(re.search(rf"\b(?:{_CONTEXT_RESET_CUE})", folded))
+        cue = re.search(rf"\b(?:{_CONTEXT_RESET_CUE})", folded)
+        # "Don't forget the plan" keeps it.
+        return bool(cue) and not re.search(r"\b(?:don'?t|do not|never|nao|nunca)\s*$", folded[: cue.start()])
 
     @classmethod
     def _strip_context_reset_prefix(cls, message: str) -> str:
@@ -1732,76 +1737,6 @@ class MultiAgentAssistant:
             )
         ) or mode_only_follow_up
 
-    def _build_unconfirmed_meal_revision_response(
-        self,
-        *,
-        language: str,
-        previous_area: str,
-        destinations: List[str],
-    ) -> str:
-        """Build a safe direct answer when a plan revision asks to keep an unconfirmed meal."""
-        is_pt = language == "pt"
-        folded_meal_re = re.compile(
-            r"\b(?:almoco|almoço|lunch|jantar|dinner|restaurante|restaurant|refeicao|refeição|meal)\b",
-            flags=re.IGNORECASE,
-        )
-        visible_stops = [
-            re.sub(r"\s+", " ", str(destination or "")).strip()
-            for destination in destinations
-            if str(destination or "").strip()
-            and not folded_meal_re.search(self._fold_context_text(str(destination or "")))
-        ][:4]
-        area_label = previous_area.strip()
-
-        if is_pt:
-            stop_lines = (
-                "\n".join(f"- 🏛️ **{stop}**: mantém como paragem interior/coberta prioritária." for stop in visible_stops)
-                if visible_stops
-                else "- 🏛️ Mantém as paragens interiores já confirmadas no roteiro anterior."
-            )
-            meal_line = (
-                f"- 🍽️ **Refeição em {area_label}:** mantém a pausa gastronómica, mas confirma um restaurante concreto antes de fechar o plano."
-                if area_label
-                else "- 🍽️ **Refeição na zona anterior:** mantém a pausa gastronómica, mas confirma um restaurante concreto antes de fechar o plano."
-            )
-            return (
-                "### ☔ **Adaptação do roteiro anterior**\n\n"
-                "✅ **Resposta direta:** adapto o plano para chuva, mas **não havia um restaurante específico confirmado** no roteiro anterior; "
-                "por isso mantenho a pausa de refeição como limitação e não a substituo por outro restaurante inventado.\n\n"
-                "---\n\n"
-                "### 📍 **O que mantém**\n\n"
-                f"{stop_lines}\n"
-                f"{meal_line}\n\n"
-                "### ☔ **Ajuste para chuva**\n\n"
-                "- Prioriza museus, monumentos visitáveis por dentro e espaços cobertos já presentes no roteiro.\n"
-                "- Evita miradouros, longas caminhadas e trocas de bairro/concelho sem nova confirmação.\n"
-                "- Mantém a ordem compacta do roteiro anterior para reduzir deslocações em dias de chuva."
-            )
-
-        stop_lines = (
-            "\n".join(f"- 🏛️ **{stop}**: keep as a priority indoor/covered stop." for stop in visible_stops)
-            if visible_stops
-            else "- 🏛️ Keep the indoor stops already confirmed in the previous itinerary."
-        )
-        meal_line = (
-            f"- 🍽️ **Meal in {area_label}:** keep the food break, but confirm a concrete restaurant before finalising the plan."
-            if area_label
-            else "- 🍽️ **Meal in the previous area:** keep the food break, but confirm a concrete restaurant before finalising the plan."
-        )
-        return (
-            "### ☔ **Previous Itinerary Rain Adaptation**\n\n"
-            "✅ **Direct answer:** I can adapt it for rain, but **no specific restaurant was confirmed** in the previous itinerary; "
-            "I keep the meal break as a limitation instead of replacing it with an invented restaurant.\n\n"
-            "---\n\n"
-            "### 📍 **What Stays**\n\n"
-            f"{stop_lines}\n"
-            f"{meal_line}\n\n"
-            "### ☔ **Rain Adjustment**\n\n"
-            "- Prioritise museums, indoor monuments, and covered spaces already present in the itinerary.\n"
-            "- Avoid viewpoints, long walks, and neighbourhood/municipality changes without new confirmation.\n"
-            "- Keep the previous compact order to reduce movement on rainy days."
-        )
-
     def _resolve_venue_anaphor(self, message: str) -> str:
         """Replace anaphoric venue references with the previous turn's venue name.
 
@@ -1911,7 +1846,10 @@ class MultiAgentAssistant:
             food_name = self._extract_food_venue_from_previous_answer(previous_assistant, ascii_noun)
             if food_name:
                 return food_name
-        # Fall back to researcher list-bullet venue cards.
+        # Fall back to the first list-bullet venue card, only for a noun that
+        # names no type: "that museum" must not become the first restaurant.
+        if ascii_noun not in {"sitio", "lugar", "local", "place", "spot", "venue"}:
+            return ""
         venue_match = self._VENUE_CARD_NAME_RE.search(previous_assistant)
         if venue_match:
             name = venue_match.group(1).strip(" .·-")
@@ -3409,7 +3347,14 @@ class MultiAgentAssistant:
             }
         else:
             anchors["expected_transport_destination"] = {}
-        if response_language == "pt":
+        # The original request keeps its mode, day, and time ("de comboio
+        # amanhã às 10h para Oeiras"); only the clarified place changes.
+        source_message = str(pending.get("source_message") or "")
+        ambiguous_fragment = str(pending.get("ambiguous_fragment") or "").strip()
+        fragment_re = re.compile(rf"\b{re.escape(ambiguous_fragment)}\b", re.IGNORECASE) if ambiguous_fragment else None
+        if fragment_re and fragment_re.search(source_message):
+            rewritten = fragment_re.sub(lambda _match: resolved_location, source_message, count=1)
+        elif response_language == "pt":
             rewritten = f"Quero ir de {origin} para {destination}."
         else:
             rewritten = f"I want to go from {origin} to {destination}."
@@ -4070,8 +4015,15 @@ class MultiAgentAssistant:
             "routing_reasoning": "Temporal research follow-up reused the previous place/event search context.",
         }
 
-    def _resolve_research_pagination_follow_up(self, message: str, language: str) -> Dict[str, Any]:
-        """Force Researcher for short 'more/another' follow-ups when a search page exists."""
+    def _resolve_research_pagination_follow_up(self, message: str, language: str, request: str = "") -> Dict[str, Any]:
+        """Force Researcher for short 'more/another' follow-ups when a search page exists.
+
+        Args:
+            message: The user's message as written.
+            language: Output language.
+            request: The follow-up interpreter's standalone rewrite, if any;
+                "more, but no museums" becomes a new search with it.
+        """
         researcher = self.agents.get("researcher")
         if researcher is None:
             return {}
@@ -4096,39 +4048,20 @@ class MultiAgentAssistant:
             return {}
         if explicit_domain and cached_domain and explicit_domain != cached_domain:
             return {}
-        normalized_message = re.sub(r"\s+", " ", (message or "").lower()).strip()
-        rejects_museums = bool(
-            re.search(
-                r"\b(?:n[aã]o\s+(?:sejam|quero|incluas?)\s+museus|sem\s+museus|not\s+museums?|not\s+museum|no\s+museums?)\b",
-                normalized_message,
-                flags=re.IGNORECASE,
-            )
+        # Event pages merge new exclusions themselves; a place page cannot, so
+        # "more, but no museums" is a new search in the same area.
+        # ("no" only in English: in Portuguese it is "in the".)
+        adds_exclusion = re.search(
+            r"\b(?:sem|exceto|nao\s+(?:sejam|quero|incluas?)|without|except|excluding|not"
+            + (r"|no" if language == "en" else "") + r")\b",
+            self._fold_context_text(message),
         )
-        if cached_domain == "places" and rejects_museums:
-            base_args = cached_context.get("base_args") if isinstance(cached_context.get("base_args"), dict) else {}
-            previous_query = " ".join(
-                str(value or "")
-                for value in (
-                    base_args.get("query"),
-                    cached_context.get("source_query"),
-                )
-            )
-            location_match = re.search(
-                r"\b(?:perto\s+d[eo]?\s+|near\s+|em\s+|in\s+)(Bel[eé]m|Baixa|Chiado|Alfama|Rossio|Oriente|Parque das Na[cç][oõ]es|Avenida da Igreja|Alc[aâ]ntara)\b",
-                previous_query,
-                flags=re.IGNORECASE,
-            )
-            location = location_match.group(1) if location_match else ("Lisboa" if language == "pt" else "Lisbon")
-            rewritten = (
-                f"Mostra jardins, miradouros e outros locais em {location}, sem museus."
-                if language == "pt"
-                else f"Show gardens, viewpoints, and other places in {location}, excluding museums."
-            )
+        if cached_domain == "places" and adds_exclusion and request:
             setattr(researcher, "_last_search_context", None)
             return {
-                "message": rewritten,
+                "message": request,
                 "agents": ["researcher"],
-                "routing_reasoning": "Conversation search context resolved into a new non-museum place search.",
+                "routing_reasoning": "More places with a new exclusion resolved into a new search in the same area.",
             }
         return {
             "message": message,
@@ -5084,8 +5017,18 @@ class MultiAgentAssistant:
 
     def _conversation_digest(self) -> str:
         """Return the recent turns and the latest itinerary for follow-up interpretation."""
-        earlier = list(self.state.get("messages") or [])[:-1][-_FOLLOW_UP_DIGEST_MESSAGES:]
+        history = list(self.state.get("messages") or [])[:-1]
+        earlier = history[-_FOLLOW_UP_DIGEST_MESSAGES:]
         parts: List[str] = []
+        # The user's own older requests hold constraints that still apply
+        # ("sou vegetariano", "sem escadas") long after their answers scroll out.
+        older_requests = [
+            str(previous.content).strip()[:200]
+            for previous in history[:-_FOLLOW_UP_DIGEST_MESSAGES]
+            if isinstance(previous, HumanMessage) and str(previous.content or "").strip()
+        ][-_FOLLOW_UP_OLDER_REQUESTS:]
+        if older_requests:
+            parts.append("Earlier user requests:\n" + "\n".join(f"- {request}" for request in older_requests))
         for previous in earlier:
             content = str(getattr(previous, "content", "") or "")
             if isinstance(previous, HumanMessage):
@@ -5110,10 +5053,6 @@ class MultiAgentAssistant:
 
     def _resolve_contextual_follow_up(self, message: str, language: str) -> Dict[str, Any]:
         """Resolve compact follow-ups such as 'there' or plan revision requests."""
-        # First, resolve anaphoric venue references like "the restaurant you
-        # suggested" so the supervisor sees a fully grounded message and can
-        # route to the correct worker(s) instead of issuing a fresh search.
-        message = self._resolve_venue_anaphor(message)
         anchors = self._get_conversation_anchors()
         if not message.strip():
             return {"message": message}
@@ -5129,19 +5068,23 @@ class MultiAgentAssistant:
         if not answers_pending_clarification:
             anchors["pending_location_clarification"] = {}
         interpretation = {} if answers_pending_clarification else self._interpret_turn(message, language)
+        if not interpretation and not answers_pending_clarification:
+            # Without the interpreter, "how do I get to that museum?" still
+            # gets the venue name from the previous answer.
+            message = self._resolve_venue_anaphor(message)
         turn_kind = interpretation.get("kind", "")
         if turn_kind == "new":
             # A standalone request is routed like a first turn; the follow-up
             # rules below would only bend it towards the previous answer.
             return {"message": message}
         has_previous_plan = bool(anchors.get("last_plan_text") or anchors.get("last_plan_summary"))
-        if turn_kind == "recall" and interpretation.get("answer"):
+        if turn_kind in {"recall", "clarify"} and interpretation.get("answer"):
             label = "Resposta direta" if language == "pt" else "Direct answer"
             return {"direct_response": f"✅ **{label}:** {interpretation['answer']}"}
         if turn_kind == "plan_change" and has_previous_plan:
             return self._plan_revision_resolution(message, language, interpretation["request"])
         if turn_kind == "more_results":
-            pagination = self._resolve_research_pagination_follow_up(message, language)
+            pagination = self._resolve_research_pagination_follow_up(message, language, interpretation["request"])
             if pagination:
                 return pagination
         if turn_kind in {"follow_up", "plan_change", "more_results"}:
@@ -5836,14 +5779,6 @@ class MultiAgentAssistant:
                 flags=re.IGNORECASE,
             )
         )
-        if previous_meal_unconfirmed and rain_or_indoor_revision:
-            return {
-                "direct_response": self._build_unconfirmed_meal_revision_response(
-                    language=language,
-                    previous_area=previous_area,
-                    destinations=list(anchors.get("last_itinerary_destinations") or []),
-                )
-            }
         if language == "pt":
             locality_constraint = (
                 f"Restrição de zona: mantém apenas pontos na zona **{previous_area}**; "
@@ -11239,8 +11174,9 @@ class MultiAgentAssistant:
                 worker_contexts["researcher"] = f"{agent_context}\n{plan_brief.to_context_line()}"
 
             if run_workers_in_parallel:
-                # Use ContextThreadPoolExecutor to propagate LangSmith tracing context
-                with ContextThreadPoolExecutor(max_workers=len(workers)) as executor:
+                # Propagates the LangSmith tracing context; the timeout below is a
+                # real deadline because the pool does not wait for late workers.
+                with deadline_executor(max_workers=len(workers)) as executor:
                     # Submit all tasks with timing
                     future_to_agent = {}
                     agent_start_times = {}
@@ -11759,7 +11695,7 @@ class MultiAgentAssistant:
 
                     if run_retry_in_parallel:
                         # Execute retry agents in parallel
-                        with ContextThreadPoolExecutor(max_workers=len(retry_agents)) as executor:
+                        with deadline_executor(max_workers=len(retry_agents)) as executor:
                             retry_futures = {}
                             for agent_name in retry_agents:
                                 if on_status_change:

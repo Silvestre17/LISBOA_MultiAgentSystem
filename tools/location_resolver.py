@@ -1866,7 +1866,10 @@ def _fetch_nominatim_results_cached(query: str) -> Tuple[Dict[str, Any], ...]:
         payload = response.json()
     except (requests.RequestException, ValueError) as exc:
         raise _GeocoderUnavailable(f"Nominatim lookup failed for {query!r}: {exc}") from exc
-    return tuple(payload) if isinstance(payload, list) else ()
+    if not isinstance(payload, list):
+        # An error body is not "no results": it must not stay in the cache.
+        raise _GeocoderUnavailable(f"Nominatim answered {query!r} with an unexpected payload")
+    return tuple(payload)
 
 
 def reverse_geocode_address(lat: float, lon: float) -> str:
@@ -2030,7 +2033,7 @@ def _fetch_photon_results_cached(query: str) -> Tuple[Dict[str, Any], ...]:
         raise _GeocoderUnavailable(f"Photon lookup failed for {query!r}: {exc}") from exc
     features = payload.get("features") if isinstance(payload, dict) else None
     if not isinstance(features, list):
-        return ()
+        raise _GeocoderUnavailable(f"Photon answered {query!r} with an unexpected payload")
     results: List[Dict[str, Any]] = []
     for feature in features:
         if isinstance(feature, dict):

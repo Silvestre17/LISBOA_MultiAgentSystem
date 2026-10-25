@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from agent.planning.legs import LegRequest
 
 from agent.agents.base import BaseAgent
+from agent.planning.brief import MONTH_NAMES_RE
 from agent.planning.legs import departure_times, door_to_door_minutes, localize_departure_notes
 from agent.prompts.transport import get_transport_prompt
 from agent.utils.geographic_scope import (
@@ -256,6 +257,10 @@ def _clean_query_fragment(part: str) -> str:
         "chiado": "Baixa-Chiado",
     }
 
+    folded = "".join(unicodedata.normalize("NFKD", char)[0] for char in part).lower()
+    day_clause = _COMMA_DAY_CLAUSE_RE.search(folded)
+    if day_clause:
+        part = part[: day_clause.start()]
     part = _strip_endpoint_mode_clauses(part.strip(" .?!,;:"))
     located_at_match = re.match(
         r"^(?P<label>.+?)\s+que\s+fica\s+(?:na|no|em|at)\s+(?P<tail>.+)$",
@@ -1505,7 +1510,7 @@ def _extract_route_endpoints(
         r"\b(?:plan|planeia|planeie|organiza|organize)\b.*?\b(?:em|in)\s+(?P<destination>[^,\?\!\.]+),\s*(?:tell me|show me)\s+how\s+to\s+get\s+there\s+from\s+(?P<origin>.+?)(?:\s+and\b|[\?\!\.,;]|$)",
         r"\b(?:como\s+(?:é\s+que\s+)?(?:fa[cç]o\s+para\s+)?(?:posso\s+)?(?:ir|voltar|regressar)|como\s+(?:é\s+que\s+)?(?:vou|volto|regresso)|como\s+chego)\s+(?:dos|das|do|da|de)\s+(?P<origin>.+?)\s+(?:para|ao|a|à|até)\s+(?P<destination>.+?)(?:\s*\?\s*(?:d[aá]\s+para|posso|can\s+i)\b|[\?\!\.,;]|$)",
         r"\b(?:como\s+(?:é\s+que\s+)?(?:posso\s+)?(?:ir|voltar|regressar)|como\s+(?:é\s+que\s+)?(?:vou|volto|regresso)|como\s+chego)\s+(?:dos|das|do|da|de)\s+(?P<origin>.+?)\s+(?:para|ao|a|à|até)\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
-        r"\bcomo\s+(?:é\s+que\s+)?(?:vou|volto|regresso|chego)\s+(?:para|ao|a|à|até)\s+(?P<destination>[^,\?\!\.;]+?)\s*,?\s+(?:a\s+partir\s+(?:dos|das|do|da|de)|desde)\s+(?P<origin>.+?)(?:[\?\!\.;]|$)",
+        r"\bcomo\s+(?:é\s+que\s+)?(?:vou|volto|regresso|chego)\s+(?:para|ao|a|à|até)\s+(?P<destination>[^\?\!\.;]+?)\s*,?\s+(?:a\s+partir\s+(?:dos|das|do|da|de)|desde)\s+(?P<origin>.+?)(?:[\?\!\.;]|$)",
         r"\b(?:quero\s+)?(?:sair|partir)\s+(?:dos|das|do|da|de)\s+(?P<origin>.+?)\s+(?:e\s+)?(?:ir|seguir|chegar)\s+(?:para|ao|a|à|até)\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
         r"\b(?:quero|preciso|tenho)\s+(?:de\s+)?ir\s+(?:dos|das|do|da|de)\s+(?P<origin>.+?)\s+(?:para|ao|a|à|até)\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
         r"\b(?:quero|preciso|tenho)\s+(?:de\s+)?ir\s+(?:para|ao|a|à)\s+(?P<destination>.+?)\s+a\s+partir\s+(?:dos|das|do|da|de)\s+(?P<origin>.+?)(?:[\?\!\.,;]|$)",
@@ -2286,7 +2291,15 @@ def _requested_route_option_modes(user_message: str) -> set[str]:
 _ANOTHER_DAY_PHRASE_RE = re.compile(
     r"\b(?:depois de amanha|day after tomorrow|amanha|tomorrow|(?:este |this |no |next )?fim de semana|(?:this |next )?weekend|"
     r"segunda-feira|terca-feira|quarta-feira|quinta-feira|sexta-feira|(?:no |na |ao |next |on )?(?:sabado|domingo)|"
-    r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)\b"
+    r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/-]\d{1,2}(?:[/-]\d{4})?|"
+    # A date by month name only after a preposition: "Ponte 25 de Abril" is a place.
+    rf"(?:(?<=\bde )|(?<=\bem )|(?<=\bdia )|(?<=\bon )|(?<=, ))(?:\d{{1,2}}(?:\s+de)?\s+(?:{MONTH_NAMES_RE})|(?:{MONTH_NAMES_RE})\s+\d{{1,2}}))\b"
+)
+# A day or part of the day after a comma is not part of a place name:
+# "Rossio, na tarde de 26 de outubro", "Belém, no sábado".
+_COMMA_DAY_CLAUSE_RE = re.compile(
+    r",\s*(?:(?:n[ao]s?|em|a|para|on|for|in\s+the|this|next)\s+)?"
+    rf"(?:\b(?:manha|tarde|noite|morning|afternoon|evening|night)\b|{_ANOTHER_DAY_PHRASE_RE.pattern})"
 )
 # Lines that only hold for leaving now: next departures, live positions, waits.
 _LIVE_DEPARTURE_LINE_RE = re.compile(
