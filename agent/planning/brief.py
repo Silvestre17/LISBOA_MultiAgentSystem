@@ -190,11 +190,11 @@ def build_plan_brief_messages(user_message: str, language: str, conversation_con
 You read Lisbon itinerary requests and return ONE JSON object. No prose, no Markdown.
 
 Fields:
-- "origin": where the user starts (the place after "starting from", "from", "partindo de", "saindo de", "a partir de", "a começar no", "parto do", "estou em", or the hotel/base area). Clean place name only, without the transport mode (write "Cais do Sodré", never "Cais do Sodré by train"). Empty string if not given.
+- "origin": where the user starts (the place after "starting from", "from", "partindo de", "saindo de", "a partir de", "a começar no", "parto do", "estou em", "estou no/na", "I'm at", "I'm in", or the hotel/base area). Clean place name only, without the transport mode (write "Cais do Sodré", never "Cais do Sodré by train"). Empty string if not given.
 - "areas": list of the neighbourhoods, districts, or municipalities where the visits happen, in the order given (e.g. ["Chiado", "Bairro Alto"], ["Belém"], ["Cascais"]). Never put the start point here unless the visits also happen there. Use [] when the plan is city-wide ("in Lisbon", "central Lisbon").
 - "named_places": specific venues, landmarks, or complexes the user wants to visit (e.g. ["Jerónimos Monastery"], ["Oceanário"], ["Boca do Inferno"]); [] if none. A venue that also sets the place of the plan ("an afternoon at LX Factory", "a manhã no Oceanário") goes here, and its neighbourhood goes in "areas" when you know it (LX Factory -> Alcântara). Do not repeat a named place in "areas".
 - "day": "today", "tomorrow", "this weekend", a weekday, or a date, as stated; "" if not stated.
-- "time_window": "morning", "afternoon", "evening", "sunset", "night", "full day", "half day", "N hours", or "N days"; "" if not stated. "meio dia" / "roteiro de meio dia" / "half a day" is "half day" (about four hours), not noon; "ao meio-dia" / "at noon" is start_time "12:00". When the user gives a duration and a part of the day, keep both ("duas horas de manhã" -> "2 hours morning", "3 hours this afternoon" -> "3 hours afternoon").
+- "time_window": "morning", "afternoon", "evening", "sunset", "night", "full day", "half day", "N hours", or "N days"; "" if not stated. A plan for a whole day that names no part of it ("plan my day tomorrow", "faz-me um plano para amanhã em Lisboa", "o que fazer no sábado") is "full day"; a single visit with a day ("visit the Oceanário tomorrow") stays "". "meio dia" / "roteiro de meio dia" / "half a day" is "half day" (about four hours), not noon; "ao meio-dia" / "at noon" is start_time "12:00". When the user gives a duration and a part of the day, keep both ("duas horas de manhã" -> "2 hours morning", "3 hours this afternoon" -> "3 hours afternoon").
 - "start_time", "end_time": "HH:MM" only when the user gives a clock time; else "".
 - "days": number of days (1 unless the user asks for more).
 - "components": list of {{"kind", "count", "detail"}} for every requested stop type. kind is one of {", ".join(COMPONENT_KINDS)}. count is the number the user asked for (e.g. "dois miradouros" -> 2, "a museum" -> 1, "two visits" -> attraction 2); use 0 when the user names the type without a number. detail keeps short qualifiers about the stop itself ("traditional", "with sunset view", "by the sea", "only if the weather allows"), not the audience. Indoor visits -> kind "indoor". A named place is also a component of its type (Jerónimos Monastery -> monument). If the user asks to "plan the visits" in an area without naming types, use [{{"kind": "attraction", "count": 0, "detail": ""}}]. How the user moves ("a pé", "on foot", "walking") is the transport mode, never a component. For a specific kind of shop or venue, keep it in detail ("livraria histórica" -> kind "shopping", detail "livraria histórica").
@@ -304,6 +304,33 @@ def plan_brief_from_payload(payload: Dict[str, Any]) -> PlanBrief:
         end_point=_clean_text(payload.get("end_point")),
         return_to_origin=bool(payload.get("return_to_origin")),
     )
+
+
+_STATED_DAY_RES = (
+    (re.compile(r"\b(?:day after tomorrow|depois de amanha)\b"), "day after tomorrow"),
+    # "amanhã" is a day, "de manhã" a part of it.
+    (re.compile(r"\b(?:tomorrow|amanha)\b"), "tomorrow"),
+)
+
+
+def fill_stated_day(brief: PlanBrief, user_message: str) -> PlanBrief:
+    """Set the brief's day from the request when the model left it empty.
+
+    "I have tomorrow afternoon free" read as a plan with no day would be
+    planned for today, with today's live departures and opening hours.
+
+    Args:
+        brief: Brief read from the request.
+        user_message: The user's request.
+
+    Returns:
+        The same brief, with ``day`` set when the request names it.
+    """
+    if brief.day:
+        return brief
+    message = normalize_text(user_message)
+    brief.day = next((day for pattern, day in _STATED_DAY_RES if pattern.search(message)), "")
+    return brief
 
 
 def roll_past_window_to_tomorrow(brief: PlanBrief, now: datetime) -> PlanBrief:
@@ -476,6 +503,19 @@ def window_stop_target(brief: PlanBrief) -> int:
     return 2 if daytime else 1 if evening else 0
 
 
+def full_day_with_evening(brief: PlanBrief) -> bool:
+    """Return whether a one-day plan runs from the morning into the night.
+
+    A full day has lunch, dinner, and one stop after dinner, unless the user
+    gave an end time before the evening.
+    """
+    return (
+        brief.days == 1
+        and is_full_day_window(brief.time_window)
+        and not (brief.end_time and brief.end_time < "19:30")
+    )
+
+
 def extra_stops_allowed(brief: PlanBrief) -> bool:
     """Return whether nearby extra stops may fill the time window.
 
@@ -516,11 +556,25 @@ def _plan_components_for_search(brief: PlanBrief) -> List[PlanComponent]:
         components.append(PlanComponent(kind="attraction"))
         kinds.add("attraction")
     window = normalize_text(brief.time_window)
-    if (brief.days > 1 or is_full_day_window(brief.time_window)) and not kinds & {"restaurant", "lunch", "dinner"}:
+    full_day_evening = full_day_with_evening(brief)
+    # A dinner the user asked for does not stand in for the lunch of a full day.
+    lunch_kinds = {"restaurant", "lunch"} if full_day_evening else {"restaurant", "lunch", "dinner"}
+    if (brief.days > 1 or is_full_day_window(brief.time_window)) and not kinds & lunch_kinds:
         components.append(PlanComponent(kind="lunch"))
+    evening = bool(re.search(r"evening|night|noite", window))
     # An evening plan built around a visit or an event usually includes dinner.
     if re.search(r"evening|night|sunset|noite|fim de tarde|por do sol", window) and not kinds & FOOD_COMPONENT_KINDS:
         components.append(PlanComponent(kind="dinner"))
+    elif (full_day_evening or brief.days > 1) and not kinds & {"restaurant", "dinner"}:
+        components.append(PlanComponent(kind="dinner"))
+    # After dinner, a full day or an evening ends with a fado house, a bar, or
+    # live music (and the day's events, searched apart), unless it is for children.
+    if (
+        (full_day_evening or evening)
+        and not kinds & {"nightlife", "event"}
+        and not any(_CHILD_AUDIENCE_RE.search(item) for item in brief.audience)
+    ):
+        components.append(PlanComponent(kind="nightlife"))
     wants_indoor_backup = brief.weather_conditional or any(
         re.search(r"rain|chuva|indoor|interior", item, re.IGNORECASE) for item in brief.preferences
     )
@@ -602,7 +656,12 @@ def plan_brief_search_requests(brief: PlanBrief, language: str) -> List[Dict[str
             proximity = (f" perto de {anchor}" if is_pt else f" near {anchor}") if anchor else (" em Lisboa" if is_pt else " in Lisbon")
             max_results = max(4, min(component.count + 3, 6))
             if component.kind not in FOOD_COMPONENT_KINDS and (brief.days > 1 or window_stop_target(brief) >= 4):
-                max_results = 8
+                # Each full day holds about four sights.
+                max_results = min(12, 4 * brief.days + 4)
+            elif component.kind not in FOOD_COMPONENT_KINDS and not component.count:
+                # A morning or an afternoon picks two or three sights, and some
+                # nearby cards are parts of one site (a castle and its tower).
+                max_results = 6
             requests.append(
                 {
                     "query": f"{base}{component_audience}{(' ' + detail) if detail else ''}{proximity}".strip(),
@@ -631,10 +690,27 @@ def plan_brief_search_requests(brief: PlanBrief, language: str) -> List[Dict[str
     return requests[:9]
 
 
-def plan_brief_event_request(brief: PlanBrief, language: str) -> Optional[Dict[str, Any]]:
-    """Return ``search_cultural_events`` arguments when the brief asks for an event."""
+def plan_brief_event_request(brief: PlanBrief, language: str, today: Optional[date] = None) -> Optional[Dict[str, Any]]:
+    """Return ``search_cultural_events`` arguments for the events a plan can use.
+
+    An event the user asked for is searched with its detail. A one-day plan
+    without one gets the events of the plan's own date, so an afternoon can
+    hold an exhibition and the night a concert or a show, not only places.
+
+    Args:
+        brief: Structured request.
+        language: Output language.
+        today: Current Lisbon date, used to date the implicit search.
+
+    Returns:
+        Keyword arguments for ``search_cultural_events``, or ``None``.
+    """
     if not any(component.kind == "event" for component in brief.components):
-        return None
+        if today is None or brief.days > 1:
+            return None
+        area = brief.activity_areas[0] if brief.activity_areas else ""
+        query = f"eventos em {area or 'Lisboa'}" if language == "pt" else f"events in {area or 'Lisbon'}"
+        return {"query": query, "max_results": 4, "language": language, "date_filter": plan_date(brief, today).isoformat()}
     detail = next((component.detail for component in brief.components if component.kind == "event" and component.detail), "")
     area = brief.activity_areas[0] if brief.activity_areas else ""
     if language == "pt":

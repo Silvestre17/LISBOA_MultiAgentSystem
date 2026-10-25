@@ -435,11 +435,15 @@ class CarrisGTFSManager:
     _UPDATE_CHECK_INTERVAL_S = 6 * 3600
     _background_refresh_lock = threading.Lock()
     _background_refresh_thread: Optional[threading.Thread] = None
+    _pending_swap_lock = threading.Lock()
 
     def __init__(self, data_dir: str = CARRIS_DATA_DIR, db_path: str = CARRIS_DB_PATH):
         self.data_dir = data_dir
         self.db_path = db_path
         self.metadata_path = CARRIS_METADATA_PATH
+        self.build_db_path = f"{db_path}.building"
+        # Present only while a finished build waits to replace the database.
+        self.pending_metadata_path = f"{db_path}.building.json"
 
     def _ensure_data_dir(self):
         """Creates data directory if it doesn't exist."""
@@ -470,7 +474,7 @@ class CarrisGTFSManager:
             return False
 
         try:
-            with sqlite3.connect(db_path) as conn:
+            with contextlib.closing(sqlite3.connect(db_path)) as conn:
                 count = conn.execute("SELECT COUNT(*) FROM stops").fetchone()[0]
             return int(count or 0) > 0
         except sqlite3.Error as exc:
@@ -560,8 +564,7 @@ class CarrisGTFSManager:
                 return True, None
 
             remote_date = match.group(1)
-            metadata = self._load_metadata()
-            local_date = metadata.get("gtfs_date")
+            local_date = self._pending_metadata().get("gtfs_date") or self._load_metadata().get("gtfs_date")
 
             if local_date != remote_date:
                 logger.info(f"GTFS update available: {local_date} -> {remote_date}")
@@ -604,9 +607,10 @@ class CarrisGTFSManager:
 
         # Build next to the live database and swap it in only when complete,
         # so concurrent readers never see a missing or half-written file.
-        build_path = f"{self.db_path}.building"
-        with contextlib.suppress(FileNotFoundError):
-            os.remove(build_path)
+        build_path = self.build_db_path
+        for stale_path in (self.pending_metadata_path, build_path):
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(stale_path)
 
         try:
             conn = sqlite3.connect(build_path)
@@ -865,49 +869,88 @@ class CarrisGTFSManager:
                 os.remove(build_path)
             return False
 
-        try:
-            # Windows refuses the swap while another handle is open (a
-            # reader, an antivirus scan, a sync client); retry briefly.
-            for attempt in range(5):
-                try:
-                    os.replace(build_path, self.db_path)
-                    break
-                except PermissionError:
-                    if attempt == 4:
-                        raise
-                    time.sleep(3)
-        except PermissionError as exc:
-            # Windows keeps open SQLite files locked; serve the current
-            # database and retry after the cooldown.
-            logger.warning(
-                "Carris database is in use; keeping the current database until the next refresh: %s",
-                exc,
-            )
-            with contextlib.suppress(OSError):
-                os.remove(build_path)
-            CarrisGTFSManager._refresh_cooldown_until = (
-                time.time() + CarrisGTFSManager._REFRESH_COOLDOWN_S
-            )
-            return False
+        metadata = {
+            "gtfs_date": gtfs_date,
+            "updated_at": datetime.now().isoformat(),
+            "db_path": os.path.basename(self.db_path),
+            "schema_version": "2.0",  # Indicates optimized schema
+            "features": [
+                "primary_keys",
+                "foreign_keys_declarative",
+                "indexes",
+                "analyzed",
+            ],
+        }
+        # Windows refuses the swap while another handle is open (a reader, an
+        # antivirus scan, a sync client); retry briefly.
+        for attempt in range(5):
+            try:
+                os.replace(build_path, self.db_path)
+                break
+            except PermissionError:
+                if attempt == 4:
+                    return self._park_pending_database(metadata)
+                time.sleep(3)
 
-        self._save_metadata(
-            {
-                "gtfs_date": gtfs_date,
-                "updated_at": datetime.now().isoformat(),
-                "db_path": os.path.basename(self.db_path),
-                "schema_version": "2.0",  # Indicates optimized schema
-                "features": [
-                    "primary_keys",
-                    "foreign_keys_declarative",
-                    "indexes",
-                    "analyzed",
-                ],
-            }
-        )
+        self._save_metadata(metadata)
 
         db_size = os.path.getsize(self.db_path) / (1024 * 1024)
         logger.info(f"SQLite database created: {db_size:.1f} MB (optimized schema v2.0)")
         return True
+
+    def _park_pending_database(self, metadata: Dict[str, Any]) -> bool:
+        """Mark a finished build that open handles kept from replacing the database.
+
+        ``ensure_database`` swaps it in on a later call, once no handle holds
+        either file (at the latest on the next start).
+
+        Returns:
+            False, because the current database is still the one being served.
+        """
+        try:
+            with open(self.pending_metadata_path, "w") as f:
+                json.dump(metadata, f, indent=2)
+            logger.info(
+                "Carris GTFS %s is built; it replaces the current database once no connection holds it",
+                metadata["gtfs_date"],
+            )
+        except OSError as exc:
+            logger.warning("Could not keep the new Carris database; serving the current one: %s", exc)
+            with contextlib.suppress(OSError):
+                os.remove(self.build_db_path)
+            CarrisGTFSManager._refresh_cooldown_until = (
+                time.time() + CarrisGTFSManager._REFRESH_COOLDOWN_S
+            )
+        return False
+
+    def _pending_metadata(self) -> Dict[str, Any]:
+        """Return the metadata of a finished build waiting for the swap, or an empty dict."""
+        if not os.path.exists(self.pending_metadata_path) or not os.path.exists(self.build_db_path):
+            return {}
+        try:
+            with open(self.pending_metadata_path, "r") as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
+
+    def _apply_pending_database(self) -> None:
+        """Swap in a finished build once no handle holds the current database."""
+        if not os.path.exists(self.pending_metadata_path):
+            return
+        with CarrisGTFSManager._pending_swap_lock:
+            metadata = self._pending_metadata()
+            if not metadata:
+                with contextlib.suppress(OSError):
+                    os.remove(self.pending_metadata_path)
+                return
+            try:
+                os.replace(self.build_db_path, self.db_path)
+            except PermissionError:
+                return
+            self._save_metadata(metadata)
+            with contextlib.suppress(OSError):
+                os.remove(self.pending_metadata_path)
+        logger.info("Carris database updated to GTFS %s", metadata["gtfs_date"])
 
     def _schedule_background_refresh(self) -> None:
         """Start one background freshness check when the interval has elapsed."""
@@ -965,6 +1008,7 @@ class CarrisGTFSManager:
 
     def ensure_database(self, force_update: bool = False) -> bool:
         """Ensures the database exists; a usable one is refreshed in the background."""
+        self._apply_pending_database()
         if not force_update and os.path.exists(self.db_path):
             local_database_ready = self._database_has_stops()
             if local_database_ready:

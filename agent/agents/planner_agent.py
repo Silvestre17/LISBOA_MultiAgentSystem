@@ -41,18 +41,23 @@ from agent.planning.compose import (
     drop_closed_cards,
     drop_closed_stops,
     drop_duplicate_stops,
+    drop_extra_counted_stops,
     drop_operator_cards,
     drop_topic_cards,
     label_meal_stops,
+    order_blocks_by_time,
     other_event_options,
     plan_sources,
     repair_messages,
     resolve_plan_legs,
 )
 from agent.planning.prompts import build_brief_plan_messages
-from agent.planning.quality import review_plan_draft, unmet_component_notes, untimed_event_notes
+from agent.planning.quality import review_plan_draft, snap_events_to_sessions, unmet_component_notes, untimed_event_notes
 
 logger = logging.getLogger(__name__)
+
+# Review-and-repair rounds of a brief-driven plan draft.
+_PLAN_REPAIR_ROUNDS = 2
 
 _PLANNER_FIELD_LABELS = {
     "brief description",
@@ -5487,6 +5492,16 @@ def _extract_requested_plan_origin(user_message: str) -> str:
         r"\bcomo\s+(?:chegar|ir|vou|vamos)\s+(?:desde|a\s+partir\s+d(?:e|o|a|os|as))\s+(?P<origin>[^,.;]+?)(?:[,.;]|$)",
         r"\ba partir d(?:e|o|a|os|as)\s+(?P<origin>[^,.;]+?)(?:[,.;]?\s+(?:faz|com|inclui|incluindo|para|e)\b|$)",
         r"\bde\s+(?P<origin>[^,.;]+?)\s+para\b",
+        # Where the user is now ("I'm at Rossio", "Estou no Rossio") is the
+        # start point. The place must be capitalised so that "I'm in a hurry"
+        # or "estou na dúvida" never becomes an origin.
+        r"\b(?:i'?m|i\s+am|we'?re|we\s+are)\s+(?:currently\s+|now\s+|staying\s+)?(?:at|in|near|by|close\s+to)\s+"
+        r"(?!(?:Lisboa|Lisbon|Portugal)\b)(?-i:(?P<origin>[A-ZÀ-Ý][^,.;]*?))"
+        r"(?:[,.;!?]|\s+(?:and|but|so|with|for|until|today|tomorrow|now|right\s+now|at\s+the\s+moment)\b|$)",
+        r"\b(?:estou|estamos|encontro[-\s]?me|encontramo[-\s]?nos)\s+(?:agora\s+|hospedad[oa]s?\s+|alojad[oa]s?\s+)?"
+        r"(?:no|na|nos|nas|em|perto\s+d[eoa]s?|junto\s+ao?)\s+"
+        r"(?!(?:Lisboa|Lisbon|Portugal)\b)(?-i:(?P<origin>[A-ZÀ-Ý][^,.;]*?))"
+        r"(?:[,.;!?]|\s+(?:e|mas|com|at[eé]|hoje|amanh[aã]|agora|neste\s+momento)\b|$)",
     ]
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -5500,6 +5515,8 @@ def _extract_requested_plan_origin(user_message: str) -> str:
             ).strip(" .:-")
             origin = re.sub(
                 r"\s+(?:and\s+using|using|with|including|and\s+public\s+transport|"
+                r"by\s+(?:train|metro|bus|tram|ferry|boat|public\s+transport)|"
+                r"de\s+(?:comboio|metro|autocarro|el[eé]trico|barco|transportes?)|"
                 r"e\s+usando|usando|com\s+transporte|e\s+transporte)\b.*$",
                 "",
                 origin,
@@ -13922,23 +13939,33 @@ class PlannerAgent(BaseAgent):
         raw_answer = str(getattr(response, "content", "") or "")
         draft = parse_plan_draft_json(raw_answer)
         critical, repairable = review_plan_draft(draft, evidence, brief) if draft else (["invalid JSON"], [])
-        if critical or repairable:
+        # A repair often fixes some issues and opens others; a second round
+        # works on what is left of the better draft.
+        for _round in range(_PLAN_REPAIR_ROUNDS):
+            if not (critical or repairable):
+                break
             try:
                 retry = self._safe_llm_invoke(self.llm, repair_messages(messages, raw_answer, [*critical, *repairable]), retries=1)
-                retried = parse_plan_draft_json(str(getattr(retry, "content", "") or ""))
+                retried_raw = str(getattr(retry, "content", "") or "")
+                retried = parse_plan_draft_json(retried_raw)
             except Exception as exc:
                 logger.warning("Planner repair call failed: %s", exc)
-                retried = None
-            if retried is not None:
-                retried_critical, _ = review_plan_draft(retried, evidence, brief)
-                if not retried_critical:
-                    draft, critical = retried, []
+                break
+            if retried is None:
+                break
+            retried_critical, retried_repairable = review_plan_draft(retried, evidence, brief)
+            # A repair that fixes one issue but opens more (an afternoon
+            # dropped to fix the lunch time) is worse than the draft before it.
+            if retried_critical or not (critical or len(retried_repairable) <= len(repairable)):
+                break
+            draft, raw_answer, critical, repairable = retried, retried_raw, [], retried_repairable
         if draft is None or critical:
             return ""
 
-        draft = drop_duplicate_stops(curate_block_details(draft, evidence, brief, language))
+        draft = drop_extra_counted_stops(drop_duplicate_stops(curate_block_details(draft, evidence, brief, language)), evidence, brief)
         if not draft.blocks:
             return ""
+        draft = order_blocks_by_time(snap_events_to_sessions(draft, evidence))
         draft = clean_plan_notes(draft, brief, language)
         draft = drop_closed_stops(draft, evidence, brief, language)
         draft = resolve_plan_legs(draft, evidence, brief, self.leg_resolver, language)

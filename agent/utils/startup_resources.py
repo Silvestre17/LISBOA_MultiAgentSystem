@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sqlite3
@@ -86,7 +87,7 @@ def _count_sqlite_rows(db_path: str, table_name: str) -> int:
         return 0
 
     try:
-        with sqlite3.connect(db_path) as connection:
+        with contextlib.closing(sqlite3.connect(db_path)) as connection:
             cursor = connection.cursor()
             cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
             row = cursor.fetchone()

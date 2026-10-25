@@ -69,6 +69,7 @@ from agent.utils.response_formatter import (
     is_overcomplex_planning_request,
     format_response,
     generate_response_title,
+    keep_worker_hours_direct_answer,
     operators_from_tool_names,
     reconcile_researcher_place_response,
     rebuild_transport_source_line,
@@ -149,7 +150,7 @@ from tools.metrolisboa_api import (
 )
 
 # Multi-modal transport routing
-from tools.transport_api import get_route_between_stations, get_transport_summary
+from tools.transport_api import get_route_between_stations, get_transport_summary, origin_with_name_head
 from tools.visitlisboa_api import (
     get_event_categories,
     get_place_categories,
@@ -2702,7 +2703,7 @@ class MultiAgentAssistant:
         if not message:
             return ""
         patterns = (
-            r"\b(?:desde|a partir de|from)\s+(?P<origin>.+?)(?:\s+(?:para|até|ate|to)\b|[?.,;]|$)",
+            r"\b(?:desde|a partir d(?:e|o|a|os|as)|from)\s+(?P<origin>.+?)(?:\s+(?:para|até|ate|to)\b|[?.,;]|$)",
             r"\b(?:de|do|da)\s+(?P<origin>.+?)\s+(?:para|até|ate|ao|à|a|to)\b",
         )
         for pattern in patterns:
@@ -2776,6 +2777,8 @@ class MultiAgentAssistant:
             r"(?:metro|autocarros?|comboios?|bus(?:es)?|train(?:s)?|trams?|el[eé]tricos?)\b.*$",
             r"\s+(?:como\s+(?:posso|podia|consigo|devo)\s+(?:fazer|ir|chegar)|how\s+can\s+i\s+(?:go|get|do))\b.*$",
             r"\s+(?:d[aá]-me|diz-me|give\s+me|tell\s+me)\s+(?:outr[oa]s?|other|more)\b.*$",
+            # A second question joined to the route ("... para Oriente e vai chover?").
+            r",?\s+(?:e|and)\s+(?:vai|ser[aá]|est[aá]|como|qual|que|will|is|how|what|do(?:es)?\s+(?:i|we|you|it))\b.*$",
         ):
             cleaned = re.sub(cleanup_re, "", cleaned, flags=re.IGNORECASE)
         return re.sub(r"\s+", " ", cleaned).strip(" .,:;?!-")
@@ -2799,7 +2802,8 @@ class MultiAgentAssistant:
             match = re.search(pattern, scan_text, flags=re.IGNORECASE)
             if not match:
                 continue
-            origin = MultiAgentAssistant._clean_transport_route_endpoint(match.group("origin"))
+            raw_origin = origin_with_name_head(scan_text, match) if pattern == patterns[-1] else match.group("origin")
+            origin = MultiAgentAssistant._clean_transport_route_endpoint(raw_origin)
             destination = MultiAgentAssistant._clean_transport_route_endpoint(match.group("destination"))
             origin = re.sub(
                 r"^\s*(?:rota\s+de\s+transporte\s+p[úu]blico|public\s+transport\s+route|trajeto|route)\s*:\s*",
@@ -3797,6 +3801,36 @@ class MultiAgentAssistant:
                 "from reported disruptions and do not invent timetables."
             )
         return message
+
+    @classmethod
+    def _route_only_message(cls, message: str, route_pair: Dict[str, str], language: str) -> str:
+        """Rewrite a turn as its route question alone, keeping the mode, day and time.
+
+        Args:
+            message: The user's turn, which also asks something else.
+            route_pair: Origin and destination read from the turn.
+            language: Response language.
+
+        Returns:
+            "How do I get by metro from A to B tomorrow at 9am?" style question.
+        """
+        mode_hint = cls._transport_follow_up_mode_hint(message, language)
+        mode = f"{mode_hint} " if mode_hint in {"de metro", "de autocarro", "de comboio", "by metro", "by bus", "by train"} else ""
+        if language == "pt":
+            base = f"Como vou {mode}de {route_pair['origin']} para {route_pair['destination']}?"
+        else:
+            base = f"How do I get {mode}from {route_pair['origin']} to {route_pair['destination']}?"
+        day = re.search(
+            r"\b(?:depois\s+de\s+amanh[ãa]|day\s+after\s+tomorrow|amanh[ãa]|tomorrow|hoje|today)"
+            r"(?:\s+(?:de\s+manh[ãa]|[àa]\s+tarde|morning|afternoon|evening))?\b",
+            message,
+            flags=re.IGNORECASE,
+        )
+        if day and cls._fold_context_text(day.group(0)) not in cls._fold_context_text(
+            cls._extract_transport_temporal_phrase(message)
+        ):
+            base = f"{base[:-1]} {day.group(0)}?"
+        return cls._append_transport_temporal_phrase(base, message)
 
     @staticmethod
     def _extract_transport_temporal_phrase(message: str) -> str:
@@ -5029,7 +5063,9 @@ class MultiAgentAssistant:
                 r"como\s+(?:esta|est[aá]|vai\s+estar)\s+o?\s*tempo|"
                 r"tempo\s+(?:hoje|amanha|amanh[aã]|agora|neste|esta|este)|"
                 r"temperatura|guarda[-\s]?chuva|umbrella|meteorolog|"
-                r"avisos?\s+meteorolog|weather\s+warning)\b",
+                r"avisos?\s+meteorolog|weather\s+warning|"
+                r"(?:vai\s+(?:estar|fazer)|faz|esta)\s+(?:muito\s+)?(?:frio|calor|vento)|"
+                r"(?:will|is)\s+it\s+(?:be\s+)?(?:very\s+)?(?:cold|hot|warm|windy|sunny))\b",
                 normalized,
             )
         )
@@ -5314,10 +5350,16 @@ class MultiAgentAssistant:
                         r"(?P<place>[A-ZÀ-Ý][\w'’-]*(?:\s+(?:(?:d[aeo]s?|de|the|of)\s+)?[A-ZÀ-Ý][\w'’-]*)*)",
                         message,
                     )
-                    visit_place = (visit_target.group("place").strip() if visit_target else "") or current_route_pair[1]
+                    visit_place = (
+                        visit_target.group("place").strip() if visit_target else ""
+                    ) or current_route_pair["destination"]
                     visit_message = (
                         f"O que visitar em {visit_place}?" if language == "pt" else f"What to visit in {visit_place}?"
                     )
+                    if rewritten_message == message:
+                        # The transport worker gets the route alone: handed "...
+                        # and will it rain?", it answers the weather from its own data.
+                        rewritten_message = self._route_only_message(message, current_route_pair, language)
                     return {
                         "message": rewritten_message,
                         "agents": ["weather", "transport", *(["researcher"] if wants_visit_context else [])],
@@ -5585,6 +5627,38 @@ class MultiAgentAssistant:
                     # the same sentence, so let normal routing interpret it instead
                     # of stalling the request on a canned clarification.
                     return {}
+                # "How do I get there from Rossio?" after a list of places:
+                # offer those places, and continue the route with the one chosen.
+                candidates = [
+                    str(title).strip() for title in anchors.get("last_itinerary_destinations") or [] if str(title).strip()
+                ][:5]
+                there_origin = self._extract_follow_up_origin(message)
+                if len(candidates) >= 2 and there_origin:
+                    options = [{"letter": letter, "label": title} for letter, title in zip("abcde", candidates)]
+                    listed = "\n".join(f"- **{option['letter'].upper()})** {option['label']}" for option in options)
+                    clarification = (
+                        "### 🧭 **Preciso de confirmar o destino**\n\n"
+                        f"✅ **Resposta direta:** para qual destes locais queres ir a partir de **{there_origin}**?\n\n"
+                        f"{listed}\n\nResponde com a letra ou o nome."
+                        if language == "pt"
+                        else "### 🧭 **Destination needs confirmation**\n\n"
+                        f"✅ **Direct answer:** which of these places do you want to reach from **{there_origin}**?\n\n"
+                        f"{listed}\n\nReply with the letter or the name."
+                    )
+                    return {
+                        "clarification": clarification,
+                        "pending_clarification": {
+                            "kind": "transport_route",
+                            "ambiguous_field": "destination",
+                            "ambiguous_fragment": "",
+                            "origin": there_origin,
+                            "destination": "",
+                            "destination_fragment": "",
+                            "options": options,
+                            "source_message": message[:300],
+                            "language": language,
+                        },
+                    }
                 clarification = (
                     "Which destination do you want directions to?"
                     if language != "pt"
@@ -8436,6 +8510,9 @@ class MultiAgentAssistant:
 
         if routing_reasoning.startswith("Unsupported transaction rewritten"):
             final_output = _with_booking_limitation(final_output, language)
+        if set(effective_agents) == {"researcher"}:
+            # The final QA repair can rewrite the direct answer after reconciliation.
+            final_output = keep_worker_hours_direct_answer(final_output, str(agent_outputs.get("researcher") or ""))
 
         return self._publish_final_response(
             final_output,
@@ -10723,7 +10800,7 @@ class MultiAgentAssistant:
                 simple_weather_fact_check=None,
             )
         if contextual_resolution.get("clarification"):
-            return self._finalize_chat_response(
+            clarification_response = self._finalize_chat_response(
                 response=contextual_resolution["clarification"],
                 message=message,
                 language=effective_language,
@@ -10739,6 +10816,13 @@ class MultiAgentAssistant:
                 final_repair_ran=False,
                 simple_weather_fact_check=None,
             )
+            # Publishing the answer resets the anchors; the question asked now
+            # is what the next reply answers.
+            if contextual_resolution.get("pending_clarification"):
+                self._get_conversation_anchors()["pending_location_clarification"] = contextual_resolution[
+                    "pending_clarification"
+                ]
+            return clarification_response
         message = contextual_resolution.get("message", message)
 
         if is_overcomplex_planning_request(message):

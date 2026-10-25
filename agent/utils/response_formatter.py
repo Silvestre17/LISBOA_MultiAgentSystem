@@ -69,7 +69,12 @@ _NON_EVIDENCE_SOURCE_FOOTER_RE = re.compile(
 
 _PT_LANGUAGE_HINTS_RE = re.compile(
     r"\b(olá|ola|bom dia|boa tarde|boa noite|como|qual|quais|quando|quanto|quantos|quantas|passa|chega|sai|demora|quero|queria|quiser|puder|afinal|preciso|vou|ir|usar|existem|h[aá]|est[aá]|planeia|planejar|plano|roteiro|sugere|visitar|passeio|museu|museus|evento|eventos|hoje|amanhã|amanha|previsão|tempo|locais|morada|fonte|autocarro|autocarros|comboio|comboios|linhas?|perturba[cç][aã]o|perturba[cç][oõ]es|transportes?|situa[cç][aã]o|d[aá]-?me|leva-me|evita|apanh(?:a|ar)|bairro|perto|entre|até|ate|centro\s+comercial|compras?|lojas?|lisboa|pr[oó]xim[oa]s?|obrigad[oa]s?|onde|agora)\b|"
-    r"\be\s+se\b",
+    r"\be\s+se\b|"
+    # Portuguese-only words of short requests ("Restaurantes de peixe em Belém"),
+    # which langdetect reads as Catalan; words common in venue names are left out.
+    r"\b(?:em|restaurantes|peixe|marisco|jantar|almo[cç]o|comer|barat[oa]s?|s[ií]tios?)\b|"
+    # Portuguese travel modes ("Saldanha para Oriente de metro"): "metro" alone is shared with English.
+    r"\bde\s+(?:metro|autocarro|comboio|el[eé]trico|barco|t[aá]xi)\b|\ba\s+p[eé]\b",
     re.IGNORECASE,
 )
 _STRONG_PT_QUERY_RE = re.compile(
@@ -79,7 +84,7 @@ _STRONG_PT_QUERY_RE = re.compile(
     re.IGNORECASE,
 )
 _PT_ROUTE_PHRASE_RE = re.compile(
-    r"\b(?:metro|autocarro|autocarros|comboio|comboios|carris|linha)\s*:?\s*[^.\n?!]+?\s+para\s+[^.\n?!]+|"
+    r"\b(?:metro|autocarro|autocarros|comboio|comboios|carris|linha)\s*:?\s*[^.\n?!]*?\s+para\s+[^.\n?!]+|"
     r"\b(?:e\s+se\s+)?(?:quiser|quero|queria|preciso|vou|posso|tenho)\s+(?:de\s+)?ir\b|"
     r"\bleva-me\b|"
     r"\b(?:como\s+(?:é\s+que\s+)?(?:posso\s+)?(?:vou|ir|chego|chegar))\b|"
@@ -92,7 +97,10 @@ _PT_ROUTE_PHRASE_RE = re.compile(
     re.IGNORECASE,
 )
 _EN_LANGUAGE_HINTS_RE = re.compile(
-    r"\b(hello|hi|good morning|good afternoon|good evening|what|where|when|which|who|why|how|tell me|give me|summari[sz]e|only use|supported details|without inventing|historical importance|plan|afternoon|evening|night|trip|visit|around|can you|could you|would you|i want|i need|please|today|tomorrow|weather|forecast|museum|museums|event|events|book fair|train|bus|tram|metro|source|address|is|should|best|way|from|to|thanks|thank you|next)\b",
+    r"\b(hello|hi|good morning|good afternoon|good evening|what|where|when|which|who|why|how|tell me|give me|summari[sz]e|only use|supported details|without inventing|historical importance|plan|afternoon|evening|night|trip|visit|around|can you|could you|would you|i want|i need|please|today|tomorrow|weather|forecast|museum|museums|event|events|book fair|train|bus|tram|metro|source|address|is|should|best|way|from|to|thanks|thank you|next|"
+    # English-only words of requests such as "Recommend a restaurant near Alfama"
+    # ("the" and "and" are left out: they are in English venue names).
+    r"recommend|suggest|find|show me|near|nearby|restaurant|restaurants|i'?m|i am)\b",
     re.IGNORECASE,
 )
 _STRONG_EN_QUERY_RE = re.compile(
@@ -4911,6 +4919,12 @@ def material_source_ids_for_response(text: str) -> List[str]:
             re.search(r"\b(?:12e|15e|18e|25e|28e)\b", plain)
             and re.search(r"\b(?:eletrico|electrico|tram|autocarro|bus|route|rota|linha|line)\b", plain)
         )
+        # A bus option card: "- 708: para Sacavém" with "apanha em ...; sai em ...".
+        or (
+            not has_metropolitana_context
+            and re.search(r"(?m)^\s*-\s+\d{2,3}[a-z]?:\s", plain)
+            and re.search(r"\b(?:apanha em|board at)\b", plain)
+        )
     ):
         add("carris")
 
@@ -7334,6 +7348,9 @@ def reconcile_researcher_event_response(
         return text
     if re.search(r"(?i)\b(?:Event Categories in Lisbon|Categorias de Eventos em Lisboa)\b", f"{text}\n{worker_text}"):
         return text
+    # A no-result answer lists its alternatives as compact lines, not cards.
+    if re.search(r"(?m)^###\s+🎭\s+\*\*(?:Sem eventos confirmados|No confirmed events)\*\*", text):
+        return text
     worker_canonical = format_researcher_event_cards(worker_text, language=language, user_query=user_query)
     primary_intro, primary_events, primary_source = _parse_structured_event_cards(text, language=language)
     fallback_intro, fallback_events, fallback_source = _parse_structured_event_cards(worker_canonical, language=language)
@@ -7490,7 +7507,27 @@ def reconcile_researcher_place_response(
         return worker_canonical
     if _place_response_lost_worker_fields(text, worker_canonical):
         return worker_canonical
-    return text
+    return keep_worker_hours_direct_answer(text, worker_text)
+
+
+_DIRECT_ANSWER_LINE_RE = re.compile(r"(?m)^✅\s+\*\*(?:Resposta direta|Direct answer):\*\*[^\n]*$")
+_HOURS_WORD_RE = re.compile(r"\bhor[aá]rio|\bopening hours\b|\bhours\b", re.IGNORECASE)
+
+
+def keep_worker_hours_direct_answer(text: str, worker_text: str) -> str:
+    """Restore the worker's direct answer when a QA rewrite dropped its opening-hours clause.
+
+    "Qual é o horário do X?" is answered with the hours, or with a note that
+    the data has none; a rewrite that keeps only the address no longer
+    answers the question.
+    """
+    worker_direct = _DIRECT_ANSWER_LINE_RE.search(worker_text or "")
+    final_direct = _DIRECT_ANSWER_LINE_RE.search(text or "")
+    if not worker_direct or not final_direct:
+        return text
+    if not _HOURS_WORD_RE.search(worker_direct.group(0)) or _HOURS_WORD_RE.search(final_direct.group(0)):
+        return text
+    return text[: final_direct.start()] + worker_direct.group(0) + text[final_direct.end():]
 
 
 def strip_excluded_place_cards(text: str, user_query: str = "", language: str = "en") -> str:
@@ -12996,6 +13033,10 @@ def normalize_researcher_card_field_indentation(text: str) -> str:
         "food & dining",
         "events found",
         "eventos encontrados",
+        "no confirmed events",
+        "sem eventos confirmados",
+        "no confirmed places",
+        "sem locais confirmados",
         "event categories in lisbon",
         "categorias de eventos em lisboa",
         "free events found",
@@ -17280,10 +17321,10 @@ def ensure_route_direct_answer_visual_contract(text: str) -> str:
             while after and not after[0].strip():
                 after.pop(0)
     if not direct_sentence:
-        # Name the fastest listed Carris option instead of a generic sentence.
-        from agent.planning.legs import carris_option_sentence, extract_carris_options
+        # Name the main listed Carris or Metro option instead of a generic sentence.
+        from agent.planning.legs import route_option_sentence
 
-        direct_sentence = carris_option_sentence(extract_carris_options(text), language).rstrip(".")
+        direct_sentence = route_option_sentence(text, language).rstrip(".")
     if not direct_sentence:
         direct_sentence = (
             "encontrei uma opção de transporte suportada para este trajeto"
@@ -22345,7 +22386,9 @@ def repair_malformed_event_no_result_answer(text: str, language: str = "en") -> 
         direct_count > 1
         or re.search(r"\b(?:encontrei\s+eventos\s+relevantes|i\s+found\s+relevant\s+events?)\b", normalized)
         or re.search(r"(?mi)^\s*[-*]\s+(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s*)?(?:\*\*)?(?:Evento Cultural|Cultural Event)(?:\*\*)?\s*$", text)
-        or re.search(r"\*\*\s*[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s*\*\*", text)
+        # An empty bold holding only an icon ("** \uD83C\uDFAD **"), on one line: across
+        # lines this matched every heading followed by "\u2705 **Resposta direta:**".
+        or re.search(r"\*\*[ \t]*[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+[ \t]*\*\*", text)
     )
     if not malformed:
         return text
@@ -22419,7 +22462,8 @@ _GENERIC_FOUND_DIRECT_RE = re.compile(
     r"\s+relevantes?\s+para\s+o\s+pedido(?:\s+nos\s+dados\s+dispon[íi]veis)?|"
     r"I\s+found\s+(?:(?:a|an|some)\s+)?(?:relevant\s+)?(?:places?|events?|restaurants?|options?)\s+"
     r"(?:relevant\s+)?(?:to|for)\s+the\s+request(?:\s+in\s+the\s+available\s+data)?|"
-    r"encontrei\s+op[çc][õo]es\s+de\s+restaura[çc][ãa]o\s+relevantes|I\s+found\s+relevant\s+restaurant\s+options|"
+    r"encontrei\s+op[çc][õo]es\s+de\s+restaura[çc][ãa]o\s+relevantes(?:\s+para\s+o\s+pedido)?(?:\s+nos\s+dados\s+dispon[íi]veis)?|"
+    r"I\s+found\s+relevant\s+restaurant\s+options(?:\s+for\s+the\s+request)?(?:\s+in\s+the\s+available\s+data)?|"
     r"aqui\s+tens\s+os\s+principais\s+locais\s+que\s+encontrei(?:\s+(?:em|no|na|nos|nas)\s+[^\n:;]{2,40}?)?"
     r"\s+para\s+o\s+que\s+pediste|"
     r"here\s+are\s+the\s+main\s+places\s+I\s+found(?:\s+(?:in|near|around)\s+[^\n:;]{2,40}?)?\s+for\s+your\s+request))"

@@ -29,6 +29,7 @@ from agent.planning.quality import (
     closed_all_day,
     hours_for_plan_day,
     match_block_to_card,
+    minutes_until_closing,
     open_at,
     strip_block_time,
     without_public_cards,
@@ -57,7 +58,10 @@ _INTERNAL_NOTE_RE = re.compile(
     r"(?<!lisboa )\bcards?\b|(?<!lisboa )\bcart(?:ao|oes)\b|\bevidence\b|\bevidencias?\b|\bgathered data\b|\bdados recolhidos\b|"
     r"\bfound for\b|\bencontrado para\b|\btools?\b|\bagents?\b|\bi did not\b|\bnao publiquei\b|\bfichas?\b|"
     r"\bpedido revisto\b|\brevisao pedida\b|\b(?:revised|updated) (?:request|plan|schedule|timing)\b|"
-    r"\b(?:horario|plano) revisto\b|\bthe user\b|\bo utilizador\b|\ba utilizadora\b"
+    r"\b(?:horario|plano) revisto\b|\bthe user\b|\bo utilizador\b|\ba utilizadora\b|"
+    # The model narrating its search ("no night stop was found"); code states unmet requests itself.
+    r"\bnao (?:foi|foram) encontrad\w*|\bnao encontr(?:ei|amos)\b|\b(?:was|were) not found\b|\bcould not find\b|"
+    r"\b(?:was|were) (?:not )?requested\b|\bnao (?:foi|foram) pedid\w*"
 )
 # Live departures and service-hours notices only hold for leaving now.
 _LIVE_INFO_RES = (
@@ -79,6 +83,19 @@ _LIVE_INFO_RES = (
 )
 _TRACKING_PARAM_RE = re.compile(r"(?:utm_[a-z]+|fbclid|gclid)=[^&)\s]*", re.IGNORECASE)
 _URL_QUERY_RE = re.compile(r"(https?://[^\s)?]+)\?([^\s)#]*)")
+# The forecast gives the day's minimum and maximum only, so how the
+# temperature moves during the day ("a cooler start, warmer later") is a guess
+# (normalized text).
+_INTRADAY_TEMPERATURE_RE = re.compile(
+    r"\btemperatures?\s+(?:will\s+|should\s+)?(?:rise|rises|rising|climb\w*|drop\w*|fall\w*|go(?:es)?\s+(?:up|down)|increase\w*|decrease\w*)\b|"
+    r"\b(?:it|day|weather|air|temperatures?)\s+(?:warms?|cools?|heats?)\s+(?:up|down|off)\b|"
+    r"\b(?:cooler|cool|chilly|fresh|warmer|colder|hotter)\s+(?:start|beginning|end|later|towards)\b|"
+    r"\b(?:cooler|warmer|colder|hotter)\s+(?:in\s+the\s+|by\s+the\s+)?(?:morning|afternoon|evening|night)\b|"
+    r"\btemperaturas?\s+(?:vai\s+|vao\s+|deve\s+|devem\s+)?(?:sobe|sobem|subir|desce|descem|descer|aumenta\w*|baixa\w*|cai|caem)\b|"
+    r"\b(?:aquece|arrefece)\b|"
+    r"\bmais\s+(?:fresco|fresca|frio|fria|quente)\s+(?:ao\s+(?:inicio|fim|final)|no\s+inicio|mais\s+tarde|de\s+manha|a\s+tarde|a\s+noite|ao\s+fim\s+do\s+dia)\b|"
+    r"\b(?:inicio|comeco)\s+(?:mais\s+)?(?:fresco|frio)\b"
+)
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 _CLAUSE_SPLIT_RE = re.compile(r"(?<=[;,])\s+")
 _BLOCK_TIME_RE = re.compile(r"^\s*(\d{1,2})[:h](\d{2})")
@@ -312,6 +329,28 @@ def align_schedule_with_legs(
                 else f"With the travel time, this stop starts after the {end_clock} you gave; skip it if you run out of time.",
             )
 
+    # A museum reached at 16:30 that closes at 17:00 leaves half a visit.
+    for block in blocks:
+        start = _block_start_minutes(block)
+        card = match_block_to_card(block.title, evidence)
+        if start is None or card is None or block.kind == "event" or getattr(card, "kind", "") == "event":
+            continue
+        hours = hours_for_plan_day(str((card.fields or {}).get("Hours", "")), plan_day, today)
+        remaining = minutes_until_closing(hours, start)
+        stay = block.stay_minutes or DEFAULT_STAY_MINUTES.get(block.kind, 45)
+        if remaining is not None and remaining < min(stay, _SHORT_VISIT_MINUTES) and not card_matches_kind(card, "restaurant"):
+            closing = (start + remaining) % (24 * 60)
+            clock = f"{closing // 60:02d}:{closing % 60:02d}"
+            add_note(
+                block,
+                f"Fecha às {clock}, pouco depois de chegares; vai mais cedo se quiseres visitar com calma." if is_pt
+                else f"It closes at {clock}, soon after you arrive; go earlier for an unhurried visit.",
+            )
+
+
+# Shortest useful visit before closing (minutes).
+_SHORT_VISIT_MINUTES = 45
+
 
 _TRAIN_LINE_RE = re.compile(r"\b(?:train|comboio|cp)\b")
 _LEG_ARRIVAL_RE = re.compile(r"→\s*([^:*]{2,60}?)\s*:")
@@ -388,12 +427,43 @@ def _start_after_origin_trip(blocks: List[PlanBlock], origin_line: str, last_mil
         _set_block_start(blocks[0], earliest)
 
 
+def _late_meal_swaps(day_groups: List[List[PlanBlock]], evidence: EvidenceBundle) -> List[tuple[PlanBlock, PlanBlock]]:
+    """Return the (stop, meal) pairs where the travel times pushed a meal too late.
+
+    The model times a lunch for 13:45; with the real legs and stays it can
+    start at 15:20. When the stop before it starts after midday and is close
+    to the restaurant, eating first and visiting after keeps the walk the same
+    and the meal at a normal hour. Dinners after 21:15 are treated the same.
+    """
+    pairs: List[tuple[PlanBlock, PlanBlock]] = []
+    for blocks in day_groups:
+        for previous, current in zip(blocks, blocks[1:]):
+            meal_card, stop_card = match_block_to_card(current.title, evidence), match_block_to_card(previous.title, evidence)
+            start, previous_start = _block_start_minutes(current), _block_start_minutes(previous)
+            if meal_card is None or stop_card is None or start is None or previous_start is None:
+                continue
+            if (
+                not card_matches_kind(meal_card, "restaurant")
+                or card_matches_kind(stop_card, "restaurant")
+                or "event" in {getattr(stop_card, "kind", ""), previous.kind}
+            ):
+                continue
+            late_lunch = 14 * 60 + 30 < start < 17 * 60 and previous_start >= 11 * 60 + 45
+            late_dinner = start > 21 * 60 + 15 and previous_start >= 19 * 60
+            a, b = card_coordinates(stop_card), card_coordinates(meal_card)
+            if (late_lunch or late_dinner) and a and b and haversine_distance(*a, *b) <= 1.5:
+                pairs.append((previous, current))
+    return pairs
+
+
 def resolve_plan_legs(
     draft: PlanDraft,
     evidence: EvidenceBundle,
     brief: PlanBrief,
     resolver: Optional[LegResolver],
     language: str,
+    *,
+    meals_moved: bool = False,
 ) -> PlanDraft:
     """Add the movement between the chosen stops, as confirmed by the Transport worker.
 
@@ -412,6 +482,8 @@ def resolve_plan_legs(
         resolver: Callable provided by the orchestrator that turns
             ``LegRequest`` objects into movement lines, or ``None``.
         language: Output language.
+        meals_moved: Whether a meal already swapped places with the stop
+            before it (the legs are then resolved once more, not again).
 
     Returns:
         The same draft with its movement lines merged.
@@ -457,6 +529,7 @@ def resolve_plan_legs(
         return draft
     lines += [""] * (len(requests) - len(lines))
 
+    model_movement = list(draft.movement_logic)
     model_first_line = draft.movement_logic[0] if draft.movement_logic else ""
     model_first_is_concrete = bool(
         model_first_line
@@ -494,7 +567,10 @@ def resolve_plan_legs(
     if brief.end_time:
         hour, minute = (int(part) for part in brief.end_time.split(":"))
         end_minutes = hour * 60 + minute
-    if day_groups and model_first_line in movement:
+    # The departure in the model's line is a live one: it says nothing about
+    # a plan for another day.
+    snapshot = [(block, block.title, list(block.limitations)) for block in draft.blocks]
+    if day_groups and model_first_line in movement and first_day == today:
         _start_after_origin_trip(day_groups[0], model_first_line, last_mile)
     for day_index, blocks in enumerate(day_groups):
         day_number = max(1, int(getattr(blocks[0], "day", 0) or 1))
@@ -508,6 +584,22 @@ def resolve_plan_legs(
             language=language,
         )
 
+    swaps = [] if meals_moved else _late_meal_swaps(day_groups, evidence)
+    if swaps:
+        # Back to the model's times, the meal goes first at the stop's time,
+        # and the legs and times are worked out again for the new order.
+        for block, title, limitations in snapshot:
+            block.title, block.limitations = title, limitations
+        draft.movement_logic = model_movement
+        for stop, meal in swaps:
+            stop_start = _block_start_minutes(stop)
+            i, j = draft.blocks.index(stop), draft.blocks.index(meal)
+            draft.blocks[i], draft.blocks[j] = meal, stop
+            if stop_start is not None:
+                _set_block_start(meal, stop_start)
+        return resolve_plan_legs(draft, evidence, brief, resolver, language, meals_moved=True)
+
+    _drop_stale_mode_notes(draft)
     if unresolved_return:
         target = brief.origin if brief.return_to_origin else brief.end_point
         note = (
@@ -526,6 +618,34 @@ def resolve_plan_legs(
         if note not in draft.limitations:
             draft.limitations.append(note)
     return draft
+
+
+_MODE_WORD_RES = (
+    re.compile(r"\b(?:trams?|electricos?|eletricos?)\b"),
+    re.compile(r"\b(?:bus|buses|autocarros?)\b"),
+    re.compile(r"\bmetro\b"),
+    re.compile(r"\b(?:trains?|comboios?)\b"),
+)
+
+
+def _drop_stale_mode_notes(draft: PlanDraft) -> None:
+    """Drop tips and notes that name a transport mode the resolved legs do not use.
+
+    The model writes its notes before code resolves the legs: "start with the
+    tram" is stale once the leg from the start point is bus 732.
+    """
+    movement = normalize_text(" ".join(draft.movement_logic))
+    if not movement:
+        return
+    missing = [pattern for pattern in _MODE_WORD_RES if not pattern.search(movement)]
+
+    def current(notes: List[str]) -> List[str]:
+        return [note for note in notes if not any(pattern.search(normalize_text(note)) for pattern in missing)]
+
+    draft.tips = current(draft.tips)
+    draft.limitations = current(draft.limitations)
+    for block in draft.blocks:
+        block.limitations = current(block.limitations)
 
 
 def _sentence_case(text: str) -> str:
@@ -663,6 +783,14 @@ def _restates_forecast(text: str, strategy: Sequence[str]) -> bool:
     return temperatures <= stated
 
 
+def _drop_intraday_temperature_claims(text: str) -> str:
+    """Drop the sentences of a note that say how the temperature changes during the day."""
+    return " ".join(
+        sentence for sentence in _SENTENCE_SPLIT_RE.split(str(text or "").strip())
+        if not _INTRADAY_TEMPERATURE_RE.search(normalize_text(sentence))
+    ).strip()
+
+
 def clean_plan_notes(draft: PlanDraft, brief: Optional[PlanBrief], language: str) -> PlanDraft:
     """Tidy the model's free-text notes before the legs are merged.
 
@@ -693,7 +821,7 @@ def clean_plan_notes(draft: PlanDraft, brief: Optional[PlanBrief], language: str
         for item in items:
             if language == "pt":
                 item = _portuguese_stop_word(item)
-            text = item if live_ok else _strip_live_info(item)
+            text = _drop_intraday_temperature_claims(item if live_ok else _strip_live_info(item))
             if not text:
                 continue
             normalized = normalize_text(text)
@@ -1197,6 +1325,29 @@ def _is_area_or_topic_card(title: str, address: str) -> bool:
     return not address or not _STREET_ADDRESS_RE.search(address)
 
 
+def order_blocks_by_time(draft: PlanDraft) -> PlanDraft:
+    """Put each day's stops in order of their start times.
+
+    A repair can move an event to its session (19:00) and leave the dinner
+    planned for 19:30 before it; the legs and the schedule follow the list
+    order, so the list must follow the clock. Days with an untimed stop keep
+    the model's order.
+    """
+    days: Dict[int, List[int]] = {}
+    for index, block in enumerate(draft.blocks):
+        days.setdefault(int(getattr(block, "day", 0) or 0), []).append(index)
+    ordered = list(draft.blocks)
+    for indices in days.values():
+        starts = [_block_start_minutes(draft.blocks[index]) for index in indices]
+        if any(start is None for start in starts):
+            continue
+        by_time = sorted(indices, key=lambda index: _block_start_minutes(draft.blocks[index]) or 0)
+        for slot, index in zip(indices, by_time):
+            ordered[slot] = draft.blocks[index]
+    draft.blocks = ordered
+    return draft
+
+
 def drop_duplicate_stops(draft: PlanDraft) -> PlanDraft:
     """Remove repeated stops (same card chosen twice)."""
     seen: set[str] = set()
@@ -1208,6 +1359,50 @@ def drop_duplicate_stops(draft: PlanDraft) -> PlanDraft:
         seen.add(key)
         unique.append(block)
     draft.blocks = unique
+    return draft
+
+
+def drop_extra_counted_stops(draft: PlanDraft, evidence: EvidenceBundle, brief: PlanBrief) -> PlanDraft:
+    """Keep only as many stops of a type as the user asked for.
+
+    The review asks the model to keep "2 museums" at two; this is the backstop
+    when the repaired plan still has more. The first stops of the type stay,
+    and a stop that also answers another requested type is kept.
+
+    Args:
+        draft: Plan with curated blocks, in visiting order.
+        evidence: Evidence cards available to the planner.
+        brief: Planning brief with the requested counts.
+
+    Returns:
+        The same draft without the extra stops.
+    """
+    counted = [
+        component for component in brief.components
+        if component.count and component.kind not in {"lunch", "dinner", "restaurant"}
+    ]
+    if not counted:
+        return draft
+    kinds = {component.kind for component in brief.components}
+    seen: Dict[str, int] = {}
+    kept: List[PlanBlock] = []
+    for block in draft.blocks:
+        card = match_block_to_card(block.title, evidence)
+        if card is None:
+            kept.append(block)
+            continue
+        over = [
+            component.kind for component in counted
+            if card_matches_kind(card, component.kind) and seen.get(component.kind, 0) >= component.count
+        ]
+        if over and not any(card_matches_kind(card, kind) for kind in kinds - set(over)):
+            continue
+        for component in counted:
+            if card_matches_kind(card, component.kind):
+                seen[component.kind] = seen.get(component.kind, 0) + 1
+        kept.append(block)
+    if kept:
+        draft.blocks = kept
     return draft
 
 

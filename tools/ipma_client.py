@@ -69,7 +69,7 @@ class IPMAClient:
         timeout: tuple[float, float] = (3, 6),
         cache_ttl: float = 300,
         stale_ttl: float = 6 * 3600,
-        cooldown: float = 60,
+        cooldown: float = 15,
         session: requests.Session | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -118,25 +118,31 @@ class IPMAClient:
         return result
 
     def _download(self, url: str) -> FetchResult:
-        """Request one resource once; connection failures start the cooldown."""
+        """Request one resource; a host that stays unreachable starts the cooldown."""
         target = self.base_url + url[len(IPMA_ORIGIN):]
         started = self._clock()
-        try:
-            response = self._session.get(target, timeout=self._timeout)
-            response.raise_for_status()
-            payload = response.json()
-        except requests.ConnectionError as exc:
-            # Covers ConnectTimeout: the host refused or dropped the connection.
-            with self._lock:
-                self._unreachable_until = self._clock() + self._cooldown
-            error = type(exc).__name__
-        except (requests.RequestException, ValueError) as exc:
-            error = type(exc).__name__
-        else:
-            if _is_valid(url, payload):
-                return FetchResult(payload, datetime.now(timezone.utc))
-            error = "unexpected payload"
-        logger.warning("IPMA %s failed after %.2fs: %s", target, self._clock() - started, error)
+        for attempt in range(2):
+            try:
+                response = self._session.get(target, timeout=self._timeout)
+                response.raise_for_status()
+                payload = response.json()
+            except requests.ConnectionError as exc:
+                if attempt == 0 and not isinstance(exc, requests.ConnectTimeout):
+                    # A pooled keep-alive connection that the relay or a NAT
+                    # already closed fails at once; retry on a new connection.
+                    self._session.close()
+                    continue
+                with self._lock:
+                    self._unreachable_until = self._clock() + self._cooldown
+                error, detail = type(exc).__name__, exc
+            except (requests.RequestException, ValueError) as exc:
+                error, detail = type(exc).__name__, exc
+            else:
+                if _is_valid(url, payload):
+                    return FetchResult(payload, datetime.now(timezone.utc))
+                error, detail = "unexpected payload", type(payload).__name__
+            break
+        logger.warning("IPMA %s failed after %.2fs: %s (%s)", target, self._clock() - started, error, detail)
         return FetchResult(error=error)
 
 

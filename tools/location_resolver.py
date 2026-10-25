@@ -535,6 +535,8 @@ def _build_nominatim_search_params(query: str) -> Dict[str, Any]:
         "format": "jsonv2",
         "limit": 8,
         "addressdetails": 1,
+        # Alternative and old names: "Rua do Ouro" is the Rua Áurea.
+        "namedetails": 1,
         "countrycodes": "pt",
         "viewbox": viewbox,
         "bounded": 1,
@@ -934,12 +936,18 @@ def _candidate_normalized_text(candidate: Dict[str, Any]) -> str:
     address = candidate.get("address", {}) or {}
     address_parts = [
         str(value)
-        for value in address.values()
+        for value in [*address.values(), *_candidate_names(candidate)]
         if isinstance(value, (str, int, float)) and str(value).strip()
     ]
     return normalize_location_text(
         " ".join([str(candidate.get("display_name") or ""), *address_parts])
     )
+
+
+def _candidate_names(candidate: Dict[str, Any]) -> List[str]:
+    """Return a candidate's alternative and old names (Nominatim ``namedetails``)."""
+    names = candidate.get("namedetails") or {}
+    return [str(value) for value in names.values() if isinstance(value, str) and value.strip()] if isinstance(names, dict) else []
 
 
 def _cluster_ambiguity_candidates(
@@ -1899,13 +1907,38 @@ def _reverse_geocode_address_cached(lat: float, lon: float) -> str:
     return ", ".join(part for part in parts if part)
 
 
-def _fetch_nominatim_results(query: str) -> List[Dict[str, Any]]:
-    """Return Nominatim results, or an empty list when the provider is unavailable."""
+# A provider that times out is skipped for a while: with Photon down, every
+# lookup of a plan's legs waited its full timeout and a plan took 160 s.
+_PROVIDER_BACKOFF_S = 300.0
+_provider_down_until: Dict[str, float] = {}
+
+
+def _fetch_with_backoff(provider: str, fetch: Any, query: str) -> List[Dict[str, Any]]:
+    """Return a provider's results, skipping it for a while after a timeout or connection error.
+
+    Args:
+        provider: Provider name used as the back-off key.
+        fetch: Cached fetch function that raises ``_GeocoderUnavailable``.
+        query: Geocoding query string.
+
+    Returns:
+        The provider's results, or an empty list when it is unavailable.
+    """
+    if time.monotonic() < _provider_down_until.get(provider, 0.0):
+        return []
     try:
-        return list(_fetch_nominatim_results_cached(query))
+        return list(fetch(query))
     except _GeocoderUnavailable as exc:
+        if isinstance(exc.__cause__, (requests.Timeout, requests.ConnectionError)):
+            _provider_down_until[provider] = time.monotonic() + _PROVIDER_BACKOFF_S
+            logger.warning("%s is unreachable; skipping it for %.0f s", provider, _PROVIDER_BACKOFF_S)
         logger.info("%s", exc)
         return []
+
+
+def _fetch_nominatim_results(query: str) -> List[Dict[str, Any]]:
+    """Return Nominatim results, or an empty list when the provider is unavailable."""
+    return _fetch_with_backoff("Nominatim", _fetch_nominatim_results_cached, query)
 
 
 def _format_photon_display(properties: Dict[str, Any]) -> str:
@@ -1990,11 +2023,42 @@ def _fetch_photon_results_cached(query: str) -> Tuple[Dict[str, Any], ...]:
 
 def _fetch_photon_results(query: str) -> List[Dict[str, Any]]:
     """Return Photon results, or an empty list when the provider is unavailable."""
-    try:
-        return list(_fetch_photon_results_cached(query))
-    except _GeocoderUnavailable as exc:
-        logger.info("%s", exc)
-        return []
+    return _fetch_with_backoff("Photon", _fetch_photon_results_cached, query)
+
+
+_STREET_TYPE_TERMS = {
+    "rua", "r", "avenida", "av", "travessa", "tv", "largo", "lg", "praca", "pc",
+    "calcada", "estrada", "beco", "alameda", "escadinhas", "rotunda", "azinhaga",
+}
+
+
+def _street_name_fit(result: Dict[str, Any], query_norm: str) -> float:
+    """Score how well a candidate's own name matches a street query.
+
+    Token overlap alone ranks "Rua do Rio da Prata" with "Rua da Prata 50":
+    every query word appears in it. For a street query, a candidate named
+    exactly after the street wins, and one whose name adds words loses.
+
+    Args:
+        result: Geocoder candidate.
+        query_norm: Normalized query.
+
+    Returns:
+        Score adjustment, 0.0 when the query does not name a street.
+    """
+    query_terms = query_norm.split()
+    if not query_terms or query_terms[0] not in _STREET_TYPE_TERMS:
+        return 0.0
+    street_norm = re.sub(r"(?:\s+(?:n|no)?\s*\d+[a-z]?)+$", "", query_norm).strip()
+    primary_norm = normalize_location_text(str(result.get("display_name") or "").split(",")[0])
+    if street_norm in {primary_norm, *(normalize_location_text(name) for name in _candidate_names(result))}:
+        return 3.0
+    name_terms = set(street_norm.split()) | _STREET_TYPE_TERMS
+    extra_terms = [
+        term for term in primary_norm.split()
+        if len(term) >= 3 and term not in name_terms and not term.isdigit()
+    ]
+    return -3.0 * len(extra_terms)
 
 
 def _score_nominatim_result(
@@ -2013,6 +2077,8 @@ def _score_nominatim_result(
         Ranking score where higher is better.
     """
     display_norm = normalize_location_text(result.get("display_name", ""))
+    # A street found by its alternative name ("Rua do Ouro") matches like one found by its name.
+    names_norm = normalize_location_text(" ".join([str(result.get("display_name") or ""), *_candidate_names(result)]))
     address = result.get("address", {}) or {}
     lat = _safe_float(result.get("lat"))
     lon = _safe_float(result.get("lon"))
@@ -2025,12 +2091,14 @@ def _score_nominatim_result(
 
     if display_norm == query_norm:
         score += 8.0
-    elif query_norm and query_norm in display_norm:
+    elif query_norm and query_norm in names_norm:
         score += 5.0
 
     if tokens:
-        overlap = sum(token in display_norm for token in tokens)
+        overlap = sum(token in names_norm for token in tokens)
         score += overlap * 1.2
+
+    score += _street_name_fit(result, query_norm)
 
     municipality = normalize_location_text(
         address.get("municipality")

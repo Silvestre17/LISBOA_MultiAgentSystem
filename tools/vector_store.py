@@ -225,7 +225,10 @@ class KnowledgeBase:
 
         print(f"   Loading Embeddings: {Config.EMBEDDING_MODEL_NAME}...", flush=True)
 
-        device = "cuda" if use_gpu else "cpu"
+        import torch
+
+        # The hosted Space installs CPU-only torch; local CUDA builds use the GPU.
+        device = "cuda" if use_gpu and torch.cuda.is_available() else "cpu"
         try:
             self.embeddings = HuggingFaceEmbeddings(
                 model_name=Config.EMBEDDING_MODEL_NAME,

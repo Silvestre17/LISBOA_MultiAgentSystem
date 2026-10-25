@@ -233,9 +233,9 @@ def parse_date_range(date_query: Optional[str]) -> Tuple[Optional[datetime], Opt
                 end = datetime(year, month_num + 1, 1)
             return start, end
 
-    # Try to parse ISO date (YYYY-MM-DD)
+    # Try to parse ISO date (YYYY-MM-DD; the hyphens were turned into spaces above)
     try:
-        date = datetime.strptime(date_query, '%Y-%m-%d')
+        date = datetime.strptime(date_query, '%Y %m %d')
         return date, date + timedelta(days=1)
     except ValueError:
         pass
@@ -2148,20 +2148,22 @@ def _build_specific_lookup_fallback_intro(
     content_kind: str,
 ) -> str:
     """Build an explicit intro when an exact named lookup is not found."""
-    safe_name = requested_name.strip() or ("esse pedido" if language == "pt" else "that request")
+    # "a Coldplay concert" names Coldplay, not "a coldplay".
+    safe_name = re.sub(r"(?i)^(?:a|an|the|o|os|as|um|uma)\s+", "", requested_name.strip())
+    if safe_name.islower():
+        safe_name = safe_name.title()
+    safe_name = safe_name or ("esse pedido" if language == "pt" else "that request")
     if content_kind == "event":
         if language == "pt":
             return (
                 f"Não encontrei um evento específico com o nome **{safe_name}** "
-                "na base de dados de eventos disponível. Este caminho não usa pesquisa web "
-                "para eventos, por isso não vou inventar datas, bilhetes, local, horário ou "
-                "disponibilidade. Se procura um evento confirmado, indique o estilo ou bairro."
+                "nos eventos da VisitLisboa, por isso não indico datas, bilhetes, local nem horário. "
+                "Indica o estilo ou o bairro para procurar outros eventos confirmados."
             )
         return (
             f"I could not find a specific event named **{safe_name}** "
-            "in the available events database. This events path has no current web "
-            "search, so I will not invent dates, tickets, venue, schedule, or availability. "
-            "If you want a confirmed event, please indicate the style or neighbourhood."
+            "in VisitLisboa's events, so no dates, tickets, venue or schedule are given. "
+            "Give a style or a neighbourhood to search other confirmed events."
         )
     if language == "pt":
         return (
@@ -2617,8 +2619,7 @@ def _get_vector_store():
                 # Import here to avoid circular imports and slow startup
                 from tools.vector_store import KnowledgeBase
 
-                # Initialize with CPU to avoid GPU memory issues in agent context
-                _vector_store = KnowledgeBase(use_gpu=False)
+                _vector_store = KnowledgeBase()
                 logger.info("✅ Vector store initialized for semantic search")
             except Exception as e:
                 logger.warning(f"⚠️ Vector store unavailable: {e}")
@@ -3537,6 +3538,32 @@ def _rank_place_results_by_proximity(
         ranked = nearby
     sorted_results = [item[4] for item in ranked] + [item[1] for item in unresolved] + deferred_results
     return sorted_results, str(reference_location.get("display_name") or reference)
+
+
+def _rank_top_attractions_near_reference(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Rank "top attractions near X" results by prominence, then by distance.
+
+    "Top attractions near Belém" asks for the area's landmarks (Jerónimos,
+    Torre de Belém), not for whatever is nearest to the area's centre. The
+    distance penalty still keeps the list local.
+
+    Args:
+        results: Proximity-ranked results carrying ``_distance_km``.
+
+    Returns:
+        The located results by prominence minus distance penalty, followed by
+        the results without a location in their original order.
+    """
+    located = [result for result in results if result.get("_distance_km") is not None]
+    unlocated = [result for result in results if result.get("_distance_km") is None]
+    return sorted(
+        located,
+        key=lambda result: (
+            _score_ranked_place_result(result, "top_attractions")
+            - _proximity_distance_penalty(float(result["_distance_km"]))
+        ),
+        reverse=True,
+    ) + unlocated
 
 
 def _query_requests_ranked_places(query: Optional[str]) -> bool:
@@ -4881,6 +4908,10 @@ def _title_is_reference(title: str, reference: str) -> bool:
         return False
     if len(title_tokens & reference_tokens) / len(title_tokens) >= 0.75:
         return True
+    # A title that adds words to the whole reference names a place called
+    # after it: "Torre de Belém" near Belém, "Jardim da Estrela" near Estrela.
+    if reference_tokens < title_tokens:
+        return False
     # The same place in the other language: "Jerónimos Monastery" is "Mosteiro dos Jerónimos".
     from tools.web_knowledge import wikipedia_title_matches
 
@@ -4930,6 +4961,7 @@ def _infer_place_query_intent(query: Optional[str], category: Optional[str]) -> 
         "atrações imperdíveis", "atracoes imperdiveis", "must-see", "must see",
         "first time", "primeira vez", "top attractions", "main attractions",
         "highly recommended attractions", "o que visitar",
+        "best attractions", "principais atrações", "principais atracoes", "landmarks",
     ]
 
     museum_requested = _text_contains_fuzzy_term(query, museum_terms)
@@ -5987,6 +6019,8 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
         if specific_lookup and query and not specific_lookup_query and not broad_restaurant_preference_query:
             specific_lookup_query = _normalize_lookup_text(query)
         effective_query = _apply_known_place_lookup_alias(specific_lookup_query or query)
+        # A miss names the venue as asked ("Pavilhão do Conhecimento"), not the alias used to search.
+        lookup_display_name = query.strip() if specific_lookup and query and len(query.split()) <= 8 else ""
         if specific_lookup_query:
             specific_lookup_query = _apply_known_place_lookup_alias(specific_lookup_query) or specific_lookup_query
         query_intent = _infer_place_query_intent(effective_query or query, category)
@@ -6398,6 +6432,8 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
                     ):
                         continue
                     nearby_results.append(result)
+                if query_intent == "top_attractions":
+                    nearby_results = _rank_top_attractions_near_reference(nearby_results)
                 visitlisboa_results = nearby_results[: max(requested_window, max_results)]
 
         if query_intent == "top_attractions" and not (proximity_reference and not specific_lookup):
@@ -6750,7 +6786,7 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
                 all_results = exact_matches
             else:
                 exact_lookup_not_found_intro = _build_specific_lookup_fallback_intro(
-                    specific_lookup_query,
+                    lookup_display_name or specific_lookup_query,
                     language=render_language,
                     content_kind="place",
                 )
@@ -6763,7 +6799,7 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
                     all_results = [_convert_raw_place_to_result(item) for item in fallback_items]
                     if specific_lookup_query and not exact_lookup_not_found_intro:
                         exact_lookup_not_found_intro = _build_specific_lookup_fallback_intro(
-                            specific_lookup_query,
+                            lookup_display_name or specific_lookup_query,
                             language=render_language,
                             content_kind="place",
                         )
@@ -6776,7 +6812,7 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
                         all_results = [_convert_raw_place_to_result(item) for item in fallback_items]
                         if not exact_lookup_not_found_intro:
                             exact_lookup_not_found_intro = _build_specific_lookup_fallback_intro(
-                                specific_lookup_query,
+                                lookup_display_name or specific_lookup_query,
                                 language=render_language,
                                 content_kind="place",
                             )
@@ -6791,7 +6827,7 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
                         normalized_open_data_output = _normalize_lookup_text(open_data_results)
                         if normalized_specific_lookup and normalized_specific_lookup not in normalized_open_data_output:
                             intro = _build_specific_lookup_fallback_intro(
-                                specific_lookup_query,
+                                lookup_display_name or specific_lookup_query,
                                 language=render_language,
                                 content_kind="place",
                             )
@@ -6800,7 +6836,7 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
 
             if specific_lookup_query and not all_results:
                 return _build_specific_lookup_fallback_intro(
-                    specific_lookup_query,
+                    lookup_display_name or specific_lookup_query,
                     language=render_language,
                     content_kind="place",
                 )
@@ -6837,6 +6873,8 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
                 key=lambda result: _score_ranked_place_result(result, query_intent),
                 reverse=True,
             )
+        elif query_intent == "top_attractions":
+            all_results = _rank_top_attractions_near_reference(all_results)
 
         excluded_count = 0
         if place_exclusions:

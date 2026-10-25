@@ -1352,9 +1352,9 @@ def find_nearby_services(
             displayed_results = results[1:]
             if displayed_results:
                 response += (
-                    "### Alternativas próximas\n\n"
+                    "### 📍 **Alternativas próximas**\n\n"
                     if is_pt
-                    else "### Nearby alternatives\n\n"
+                    else "### 📍 **Nearby alternatives**\n\n"
                 )
 
     if near_location_name and results:

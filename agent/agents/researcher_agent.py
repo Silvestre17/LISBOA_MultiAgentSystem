@@ -17,9 +17,12 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from tools.visitlisboa_api import (
+    MAX_USER_FACING_RESULTS,
     _extract_specific_event_lookup_phrase,
     _extract_specific_place_lookup_phrase,
     _load_places_json,
+    _localize_event_category,
+    _localize_event_date_filter,
     _score_specific_place_lookup_match,
     first_request_clause,
 )
@@ -42,12 +45,21 @@ from agent.utils.geographic_scope import (
 )
 from langgraph.prebuilt import ToolNode
 from agent.utils.response_formatter import (
+    _parse_structured_event_cards,
     finalize_worker_response,
     infer_response_language,
     resolve_output_language,
 )
 
 logger = logging.getLogger(__name__)
+
+# Month names (EN and PT) that need "in"/"em" before them in a sentence.
+_MONTH_LABELS: frozenset = frozenset({
+    "january", "february", "march", "april", "may", "june", "july", "august",
+    "september", "october", "november", "december",
+    "janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto",
+    "setembro", "outubro", "novembro", "dezembro",
+})
 
 # Words that start interrogative sentences — not place names when they appear at token[0].
 _QUESTION_STARTER_WORDS: frozenset = frozenset({
@@ -3450,6 +3462,22 @@ class ResearcherAgent(BaseAgent):
             if cleaned_subject:
                 return cleaned_subject
 
+        # "A que horas abre o Pavilhão do Conhecimento?", "What time does the MAAT close?"
+        opening_time_match = re.search(
+            r"\b(?:a\s+que\s+horas?\s+(?:abre|fecha)m?|quando\s+(?:abre|fecha)m?|"
+            r"(?:what\s+time|when)\s+(?:does|do|is)|until\s+when\s+is)\s+(?:o\s+|a\s+|os\s+|as\s+|the\s+)?"
+            r"(?P<subject>[A-ZÀ-Ýa-zà-ÿ0-9][A-ZÀ-Ýa-zà-ÿ0-9 '&’\-/]{2,120}?)"
+            r"(?=\s+(?:open|opens|close|closes|abre|fecha|hoje|amanh[ãa]|today|tomorrow)\b|[\?\!\.,;]|$)",
+            query,
+            flags=re.IGNORECASE,
+        )
+        if opening_time_match:
+            cleaned_subject = ResearcherAgent._clean_place_focus_subject(
+                opening_time_match.group("subject").strip(" .?!,;:")
+            )
+            if cleaned_subject:
+                return cleaned_subject
+
         named_lookup_re = re.compile(
             r"\b(?:tell me about|what about|more about|details about|information about|where is|where's|find|show me|d[aá][- ]?me(?: mais)? detalhes? sobre(?: o| a| os| as)?|detalhes? sobre(?: o| a| os| as)?|sobre(?: o| a| os| as)?|fala[- ]?me(?: mais)? sobre(?: o| a| os| as)?|fala[- ]?me(?: mais)? (?:de|do|da|dos|das)|fale[- ]?me(?: mais)? (?:de|do|da|dos|das)|diz[- ]?me(?: mais)? sobre(?: o| a| os| as)?|diz[- ]?me (?:de|do|da|dos|das)|diz[- ]?me onde(?: e| é| fica)(?: o| a| os| as)?|onde(?: e| é| fica)(?: o| a| os| as)?|encontra(?:r)?|mostrar(?:-me)?)\b",
             re.IGNORECASE,
@@ -3619,6 +3647,16 @@ class ResearcherAgent(BaseAgent):
         if has_place_hint and has_directional_lookup:
             return True
         if has_field_specific_lookup:
+            return True
+        # Hours or tickets of a named venue without a category word ("opening hours of MAAT",
+        # "When does the Oceanário open?", "A que horas abre o Pavilhão do Conhecimento?").
+        if re.search(
+            r"\b(?:opening hours?|hours|hor[aá]rios?|tickets?|bilhetes?|pre[cç]os?|prices?)\s+"
+            r"(?:of|for|at|do|da|dos|das|de|no|na)\s+\S|"
+            r"\b(?:when|what\s+time)\s+(?:does|do|is)\s+.+?\s+(?:open|close)|"
+            r"\b(?:a\s+que\s+horas?|quando)\s+(?:abre|fecha)m?\b",
+            query,
+        ):
             return True
         if has_place_hint and has_recommendation_lookup:
             return True
@@ -4141,6 +4179,95 @@ class ResearcherAgent(BaseAgent):
             f"{self._build_events_source_line(language)}"
         ).strip()
 
+    def _no_event_answer(self, result: str, args: Dict[str, Any], location: str, language: str, events_tool: Any) -> str:
+        """Return a no-result event answer that names the request and offers same-date alternatives.
+
+        "Jazz tomorrow in Alverca" with no match says exactly that, then lists
+        other events of the same date (keeping the user's exclusions) under a
+        heading that marks them as alternatives, instead of a bare "no
+        results" or generic events presented as the requested one.
+
+        Args:
+            result: The event tool's no-result text.
+            args: Arguments of the search that found nothing.
+            location: Place the user named, if any.
+            language: Output language.
+            events_tool: The ``search_cultural_events`` tool.
+
+        Returns:
+            Markdown answer without the source footer.
+        """
+        is_pt = language == "pt"
+        date_filter = str(args.get("date_filter") or "")
+        category = str(args.get("category") or "")
+        theme = str(args.get("query") or "")
+        # The date and the part of the day are said by "when", not as a type of event.
+        for word in [location, "eventos", "events", "evento", "event", "hoje", "today", "amanhã", "amanha", "tomorrow",
+                     "noite", "night", "tonight", "tarde", "afternoon", "manhã", "manha", "morning"]:
+            if word:
+                theme = re.sub(rf"(?i)\b{re.escape(word)}\b", " ", theme)
+        theme = " ".join(dict.fromkeys(theme.split()))
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_filter):
+            when = ("em " if is_pt else "on ") + f"{date_filter[8:10]}/{date_filter[5:7]}"
+        elif date_filter:
+            label = _localize_event_date_filter(date_filter, language=language)
+            when = (("em " if is_pt else "in ") + label) if label.lower() in _MONTH_LABELS else label
+        else:
+            when = ""
+        category_label = _localize_event_category(category, language=language).lower() if category else ""
+        what = f"{theme} ({category_label})" if theme and category_label else theme or category_label
+        if not is_pt and normalize_scope_text(location) == "lisboa":
+            location = "Lisbon"
+        if is_pt:
+            sentence = (
+                f"Não há eventos{' de ' + what if what else ''}{' ' + when if when else ''}"
+                f"{' na zona de ' + location if location else ''} com data confirmada na VisitLisboa."
+            )
+        else:
+            sentence = (
+                f"VisitLisboa has no confirmed events{' for ' + what if what else ''}{' ' + when if when else ''}"
+                f"{' in ' + location if location else ''}."
+            )
+        base = {"max_results": 3, "language": language, "offset": 0}
+        if date_filter:
+            base["date_filter"] = date_filter
+        if args.get("exclude_categories"):
+            base["exclude_categories"] = args["exclude_categories"]
+        candidates = []
+        if category and (theme or location):
+            candidates.append({**base, "category": category})
+        if category or theme or location:
+            candidates.append(dict(base))
+        # Alternatives are compact lines, not event cards: the final event
+        # formatting rebuilds every card as a requested result.
+        alternatives: List[str] = []
+        for candidate in candidates:
+            found = str(self._invoke_tool(events_tool, candidate, tool_name="search_cultural_events")).strip()
+            if not found or found.lstrip().startswith("❌") or self._event_result_no_confirmed_events(found.split("\n\n", 1)[0]):
+                continue
+            _intro, events, _source = _parse_structured_event_cards(found, language=language)
+            for event in events[:3]:
+                title = re.sub(r"^[^\w]+", "", str(event.get("title") or "")).strip()
+                venue = re.match(r"\[?([^,\]\n]+)", str(event.get("address") or ""))
+                url = str(event.get("details_url") or "")
+                parts = [f"**{title}**", str(event.get("when") or "").strip(), venue.group(1).strip() if venue else ""]
+                if url:
+                    parts.append(f"[VisitLisboa]({url})")
+                if title:
+                    alternatives.append("- " + " · ".join(part for part in parts if part))
+            if alternatives:
+                break
+        tip = next((line.strip() for line in str(result).splitlines() if line.strip().startswith("💡")), "")
+        heading = "### 🎭 **Sem eventos confirmados**" if is_pt else "### 🎭 **No confirmed events**"
+        direct_label = "Resposta direta" if is_pt else "Direct answer"
+        sections = [f"{heading}\n\n✅ **{direct_label}:** {sentence}"]
+        if alternatives:
+            other = f"Outros eventos {when}" if is_pt else f"Other events {when}"
+            sections.append(f"---\n\n**{other.strip()}:**\n\n" + "\n".join(alternatives))
+        elif tip:
+            sections.append(f"---\n\n{tip}")
+        return "\n\n".join(sections)
+
     @staticmethod
     def _event_date_filter_label(date_filter: str, language: str) -> str:
         """Return a compact user-facing label for an event date filter."""
@@ -4449,7 +4576,12 @@ class ResearcherAgent(BaseAgent):
         if language == "pt":
             result = result.replace("Family & Kids", "Família e Crianças")
         result = self._filter_event_result_for_excluded_museum_venues(result, user_message, language)
-        if re.search(r"\b(?:m[uú]sica\s+ao\s+vivo|musica\s+ao\s+vivo|live\s+music)\b", user_message, flags=re.IGNORECASE):
+        no_result = len(date_filters) <= 1 and (
+            result.lstrip().startswith("❌") or self._event_result_no_confirmed_events(result.split("\n\n", 1)[0])
+        )
+        if no_result:
+            result = self._no_event_answer(result, args, location_constraint or "", language, events_tool)
+        elif re.search(r"\b(?:m[uú]sica\s+ao\s+vivo|musica\s+ao\s+vivo|live\s+music)\b", user_message, flags=re.IGNORECASE):
             live_note = (
                 "⚠️ **Nota:** os dados confirmam a categoria **Música**; quando a página não explicita atuação ao vivo, confirma no detalhe do evento antes de ir."
                 if language == "pt"
@@ -4457,7 +4589,7 @@ class ResearcherAgent(BaseAgent):
             )
             if live_note not in result:
                 result = f"{result.rstrip()}\n\n{live_note}"
-        if location_constraint and not self._event_result_mentions_location(result, location_constraint):
+        if not no_result and location_constraint and not self._event_result_mentions_location(result, location_constraint):
             if not self._has_specific_lookup_fallback_intro(result):
                 return self._event_constraint_limitation(
                     language=language,
@@ -4465,16 +4597,13 @@ class ResearcherAgent(BaseAgent):
                     needs_evening=needs_evening_event,
                     requests_free=requests_free_event,
                 )
-        if needs_evening_event and not self._event_result_has_evening_time(result):
+        if not no_result and needs_evening_event and not self._event_result_has_evening_time(result):
             return self._event_constraint_limitation(
                 language=language,
                 location=location_constraint or "",
                 needs_evening=True,
                 requests_free=requests_free_event,
             )
-        if result.startswith("❌") and not result.lstrip().startswith("###"):
-            heading = "### 🎭 **Eventos encontrados**" if language == "pt" else "### 🎭 **Events found**"
-            result = f"{heading}\n\n{result}"
         shown_count = self._count_ranked_results(result)
         remembered_page_size = shown_count if (specific_lookup and shown_count and self._has_specific_lookup_fallback_intro(result)) else int(args["max_results"])
         base_args = {key: value for key, value in args.items() if key not in {"max_results", "offset"}}
@@ -5360,7 +5489,8 @@ class ResearcherAgent(BaseAgent):
             and place_focus_query
             and re.search(
                 r"\b(?:bilhetes?|tickets?|entradas?|pre[cç]os?|prices?|"
-                r"hor[aá]rios?|opening\s+hours?|hours?|website|site|telefone|phone|email|e-mail)\b",
+                r"hor[aá]rios?|opening\s+hours?|hours?|website|site|telefone|phone|email|e-mail|"
+                r"a\s+que\s+horas?|quando\s+(?:abre|fecha)m?|(?:when|what\s+time)\s+(?:does|do|is))\b",
                 normalized_lookup_text,
                 flags=re.IGNORECASE,
             )
@@ -6344,6 +6474,7 @@ class ResearcherAgent(BaseAgent):
             Markdown evidence cards, or an empty string when nothing was found.
         """
         from agent.planning.brief import FOOD_COMPONENT_KINDS, plan_brief_event_request, plan_brief_search_requests
+        from tools.utils import lisbon_now
 
         places_tool = self._get_tool_by_name("search_places_attractions")
         events_tool = self._get_tool_by_name("search_cultural_events")
@@ -6353,16 +6484,25 @@ class ResearcherAgent(BaseAgent):
         city_wide = not brief.activity_areas
         deferred = [item for item in requests if city_wide and item.get("_kind") in FOOD_COMPONENT_KINDS]
         immediate = [item for item in requests if item not in deferred]
-        event_args = plan_brief_event_request(brief, language) if events_tool else None
+        event_args = plan_brief_event_request(brief, language, lisbon_now().date()) if events_tool else None
 
         def run_places(args: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
             call_args = {key: value for key, value in args.items() if not key.startswith("_") and value is not None}
-            try:
-                result = str(self._invoke_tool(places_tool, call_args, tool_name="search_places_attractions") or "").strip()
-            except Exception as exc:
-                logger.warning("Planner evidence search failed for %r: %s", call_args.get("query"), exc)
-                result = ""
-            return args, result
+            # The tool shows at most one page of results; a longer plan reads the next pages.
+            wanted = int(call_args.get("max_results") or MAX_USER_FACING_RESULTS)
+            pages = [
+                {**call_args, "max_results": min(MAX_USER_FACING_RESULTS, wanted - start), "offset": start}
+                for start in range(0, wanted, MAX_USER_FACING_RESULTS)
+            ]
+            results: List[str] = []
+            for page in pages:
+                try:
+                    result = str(self._invoke_tool(places_tool, page, tool_name="search_places_attractions") or "").strip()
+                except Exception as exc:
+                    logger.warning("Planner evidence search failed for %r: %s", page.get("query"), exc)
+                    break
+                results.append(result)
+            return args, "\n\n".join(result for result in results if result)
 
         def run_events(args: Dict[str, Any]) -> str:
             try:

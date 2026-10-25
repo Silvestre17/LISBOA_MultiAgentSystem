@@ -11,9 +11,17 @@
 import json
 import re
 from datetime import timedelta
+from itertools import permutations
 from typing import Any, List, Sequence
 
-from agent.planning.brief import WEEKDAY_NAMES, is_full_day_window, plan_date, window_stop_target
+from agent.planning.brief import (
+    WEEKDAY_NAMES,
+    extra_stops_allowed,
+    full_day_with_evening,
+    is_full_day_window,
+    plan_date,
+    window_stop_target,
+)
 from agent.planning.evidence import EvidenceBundle, normalize_text
 from agent.planning.models import PlanDraft
 from tools.place_coordinates import lookup_place_coordinates
@@ -651,6 +659,17 @@ def open_at(hours_text: str, minutes: int) -> bool | None:
     return any(_minutes_in_interval(minutes, start, end) for start, end in intervals)
 
 
+def minutes_until_closing(hours_text: str, minutes: int) -> int | None:
+    """Return how many minutes the place stays open after a time of day.
+
+    ``None`` when the hours cannot be read or no opening interval covers that time.
+    """
+    for start, end in _extract_hour_intervals(hours_text):
+        if _minutes_in_interval(minutes, start, end):
+            return end - (minutes if minutes >= start else minutes + 24 * 60)
+    return None
+
+
 def _user_prefers_portuguese(user_message: str) -> bool:
     """Return whether the request is clearly Portuguese."""
     normalized = normalize_text(user_message)
@@ -801,6 +820,14 @@ _STRICT_KINDS = {"museum", "monument", "viewpoint", "garden", "beach"}
 # music"): the chosen stop must be one, or the plan must say none was found.
 _DETAIL_TOPICS: dict[str, "re.Pattern[str]"] = {
     "bookshop": re.compile(r"\b(?:livraria|livrarias|bookshop|bookstore|books?|livros|alfarrabista)"),
+    # Specific kinds of show come before "live music": a fado show is not the
+    # classical concert or the jazz the user asked for.
+    "jazz": re.compile(r"\bjazz"),
+    "classical music": re.compile(
+        r"\b(?:musica classica|classical|orquestra|orchestra|sinfoni|symphon|filarmonic|philharmonic|"
+        r"opera|piano|recital|camara|chamber music)"
+    ),
+    "theatre": re.compile(r"\b(?:teatro|theatre|theater|peca de teatro|play)\b"),
     "live music": re.compile(r"\b(?:fado|jazz|live music|musica ao vivo|concert|concerto|live entertainment)"),
     "market": re.compile(r"\b(?:mercado|market|feira)"),
     "pastry": re.compile(r"\b(?:pastelaria|pastry|pasteis|confeitaria|nata)"),
@@ -918,15 +945,69 @@ def card_coordinates(card: Any) -> tuple[float, float] | None:
 
 
 def _zigzag_issue(matched: List[tuple[Any, Any]]) -> str:
-    """Return an issue when a day goes to another area and comes back (A → far B → A)."""
+    """Return an issue when a day goes to another area and comes back (A → far B → A).
+
+    Inside one area the same back-and-forth counts when the walk out and the
+    walk back are each over 800 m and the third stop is next to the first
+    (Jerónimos → Torre de Belém → lunch beside the Jerónimos).
+    """
     points = [(block, card_coordinates(card)) for block, card in matched]
     for (first, a), (middle, b), (last, c) in zip(points, points[1:], points[2:]):
         if not (a and b and c) or getattr(first, "day", 0) != getattr(last, "day", 0):
             continue
-        if haversine_distance(*a, *b) > 2.5 and haversine_distance(*b, *c) > 2.5 and haversine_distance(*a, *c) < 1.5:
+        out, back, across = haversine_distance(*a, *b), haversine_distance(*b, *c), haversine_distance(*a, *c)
+        if (out > 2.5 and back > 2.5 and across < 1.5) or (min(out, back) > 0.8 and across < 0.35 * min(out, back)):
             return (
                 f'the route goes from "{strip_block_time(first.title)[:40]}" to "{strip_block_time(middle.title)[:40]}" '
-                f'and back to "{strip_block_time(last.title)[:40]}"; order the stops so each area is visited once'
+                f'and back to "{strip_block_time(last.title)[:40]}"; "{strip_block_time(middle.title)[:40]}" is far from the '
+                "stops around it: move it next to stops near it (on another day if needed) or replace it with a card near "
+                f'"{strip_block_time(first.title)[:40]}", so each area is visited once'
+            )
+    return ""
+
+
+def _visit_order_issue(matched: List[tuple[Any, Any]]) -> str:
+    """Return an issue when a run of sights is visited in a needlessly long order.
+
+    Coches → Jerónimos → MAAT → Padrão walks 2.6 km along Belém; Coches →
+    MAAT → Padrão → Jerónimos covers the same stops in 1.9 km. Each run of
+    sights between meals and events keeps its first stop (where the traveller
+    arrives) and the stop that follows the run.
+    """
+    runs: List[tuple[list, tuple[float, float] | None]] = []
+    run: List[tuple[Any, Any, tuple[float, float]]] = []
+    previous_day = None
+    for block, card in matched:
+        day = getattr(block, "day", 0)
+        if run and day != previous_day:
+            runs.append((run, None))
+            run = []
+        previous_day = day
+        point = card_coordinates(card)
+        if getattr(card, "kind", "") == "event" or card_matches_kind(card, "restaurant"):
+            runs.append((run, point))
+            run = []
+        elif point:
+            run.append((block, card, point))
+        else:
+            runs.append((run, None))
+            run = []
+    runs.append((run, None))
+    for run, anchor in runs:
+        if not 3 <= len(run) <= 6:
+            continue
+
+        def length(order: tuple[tuple[Any, Any, tuple[float, float]], ...]) -> float:
+            points = [stop[2] for stop in order] + ([anchor] if anchor else [])
+            return sum(haversine_distance(*a, *b) for a, b in zip(points, points[1:]))
+
+        current = length(tuple(run))
+        best = min((tuple(run[:1]) + rest for rest in permutations(run[1:])), key=length)
+        if current - length(best) > 0.5 and current > 1.2 * length(best):
+            order = " → ".join(f'"{strip_block_time(stop[0].title)[:40]}"' for stop in best)
+            return (
+                f"the stops go back and forth ({current:.1f} km of walking where {length(best):.1f} km is enough); "
+                f"visit them in this order: {order}, and shift the times"
             )
     return ""
 
@@ -1043,30 +1124,98 @@ def _late_start_issue(draft: PlanDraft, brief: Any) -> str:
     )
 
 
-def _long_gap_issue(matched: List[tuple[Any, Any]], brief: Any) -> str:
-    """Return an issue when a plan shorter than a day leaves a long empty gap.
+def _late_full_day_start_issue(draft: PlanDraft, brief: Any) -> str:
+    """Return an issue when a full day on a later date starts in the afternoon without a reason.
+
+    "A day in Sintra tomorrow" starting at 14:41 because today's next train
+    leaves at 14:01: listed departures are today's, and a full day starts in
+    the morning unless the user gave a start time.
+    """
+    now = lisbon_now()
+    if getattr(brief, "start_time", "") or not (brief.days > 1 or window_stop_target(brief) >= 4):
+        return ""
+    if plan_date(brief, now.date()) == now.date():
+        return ""
+    first_start: dict[int, int] = {}
+    for block in draft.blocks:
+        minutes = _extract_block_start_minutes(block.title)
+        if minutes is not None:
+            day = int(getattr(block, "day", 0) or 1)
+            first_start[day] = min(first_start.get(day, minutes), minutes)
+    late = [(day, minutes) for day, minutes in sorted(first_start.items()) if minutes > 11 * 60]
+    if not late:
+        return ""
+    day, minutes = late[0]
+    return (
+        f"day {day} starts at {minutes // 60:02d}:{minutes % 60:02d}, leaving the morning empty; a full day starts around "
+        "09:30-10:00 (departure times in the transport data are for today, not for the plan day), so shift the stops earlier"
+    )
+
+
+def _unused_sights_near(card: Any, matched: List[tuple[Any, Any]], evidence: EvidenceBundle, radius_km: float = 1.5) -> List[Any]:
+    """Return the unused sight cards within walking reach of a card, nearest first, skipping parts of chosen sites."""
+    origin = card_coordinates(card)
+    if not origin:
+        return []
+    chosen = [other for _block, other in matched]
+    found: List[tuple[float, Any]] = []
+    for other in evidence.cards:
+        if (
+            getattr(other, "kind", "") != "place"
+            or card_matches_kind(other, "restaurant")
+            or any(other is item or _same_site(other, item) for item in chosen)
+        ):
+            continue
+        point = card_coordinates(other)
+        distance = haversine_distance(*origin, *point) if point else None
+        if distance is not None and distance <= radius_km:
+            found.append((distance, other))
+    return [other for _distance, other in sorted(found, key=lambda item: item[0])]
+
+
+def _long_gap_issue(matched: List[tuple[Any, Any]], brief: Any, evidence: EvidenceBundle) -> str:
+    """Return an issue when a plan leaves a long empty gap between two stops.
 
     "Uma tarde em Alfama" with a viewpoint at 14:35 and the café at 19:30
     (because it reopens then) is five hours of nothing; the stop should move
-    earlier inside its hours or be replaced.
+    earlier inside its hours or be replaced. A full day allows a longer pause
+    (a rest before dinner) but not an empty late afternoon.
     """
-    if brief.days > 1 or window_stop_target(brief) >= 4:
-        return ""
+    limit = 120 if brief.days > 1 or window_stop_target(brief) >= 4 else 90
     timed = [
         (block, card, minutes)
         for block, card in matched
         if (minutes := _extract_block_start_minutes(block.title)) is not None
     ]
     for (previous, _card, previous_start), (current, _next_card, current_start) in zip(timed, timed[1:]):
-        if getattr(previous, "day", 0) != getattr(current, "day", 0) or current.kind == "event":
+        if getattr(previous, "day", 0) != getattr(current, "day", 0):
             continue
         stay = previous.stay_minutes or DEFAULT_STAY_MINUTES.get(previous.kind, 45)
         gap = current_start - (previous_start + stay)
-        if gap > 90:
+        if gap > limit and current.kind == "event":
+            # An event keeps its session time; the gap before it needs a stop.
             return (
                 f'there are {gap} minutes with nothing planned between "{strip_block_time(previous.title)[:40]}" and '
-                f'"{strip_block_time(current.title)[:40]}"; move the later stop earlier inside its opening hours '
-                "or choose another card that is open at that time"
+                f'the event "{strip_block_time(current.title)[:40]}", whose time is fixed; add a stop in between '
+                "or move the earlier stops later"
+            )
+        if gap > limit and current_start >= 18 * 60 and card_matches_kind(_next_card, "restaurant"):
+            # Dinner cannot move into the afternoon; the afternoon needs more
+            # stops, unless no card near the earlier one is left (a rest then).
+            nearby = _unused_sights_near(_card, matched, evidence)
+            if not nearby:
+                continue
+            names = ", ".join(f'"{card.title[:50]}"' for card in nearby[:2])
+            return (
+                f'there are {gap} minutes with nothing planned between "{strip_block_time(previous.title)[:40]}" and '
+                f'dinner at "{strip_block_time(current.title)[:40]}"; add a nearby card in between, such as {names}, '
+                "and keep dinner at its time"
+            )
+        if gap > limit:
+            return (
+                f'there are {gap} minutes with nothing planned between "{strip_block_time(previous.title)[:40]}" and '
+                f'"{strip_block_time(current.title)[:40]}"; move the later stop earlier inside its opening hours, '
+                "add a stop in between or choose another card that is open at that time"
             )
     return ""
 
@@ -1108,22 +1257,128 @@ def _event_meal_distance_issue(matched: List[tuple[Any, Any]], evidence: Evidenc
     return ""
 
 
-def _short_day_issue(draft: PlanDraft, matched: List[tuple[Any, Any]], evidence: EvidenceBundle, brief: Any) -> str:
-    """Return an issue when a full day (or a day of several) ends before the afternoon.
+# Component types that do not narrow which sights the user wants to see.
+_GENERAL_COMPONENT_KINDS = {"attraction", "walk", "restaurant", "lunch", "dinner", "cafe", "pastry", "nightlife", "event"}
+_TOP_ATTRACTIONS_RE = re.compile(r"top attractions|principais atracoes")
 
-    Only raised when unused place cards could fill the afternoon.
+
+def _landmark_issue(matched: List[tuple[Any, Any]], evidence: EvidenceBundle, brief: Any) -> str:
+    """Return an issue when a general visit to one area leaves out its best-known landmark.
+
+    "Plan a visit to Belém" with the Coach Museum and the MAAT but without the
+    Jerónimos: the first card of the area's top-attractions search is its
+    best-known landmark. Requests for named places or for given sight types
+    (museums, viewpoints) choose their own stops and are left alone.
     """
-    if brief.days <= 1 and window_stop_target(brief) < 4:
+    if (
+        len(brief.activity_areas) != 1
+        or brief.named_places
+        or any(component.kind not in _GENERAL_COMPONENT_KINDS for component in brief.components)
+    ):
         return ""
+    landmark = next(
+        (
+            card for card in evidence.cards
+            if getattr(card, "kind", "") == "place"
+            and _TOP_ATTRACTIONS_RE.search(normalize_text(str((card.fields or {}).get("Found for", ""))))
+            and not card_matches_kind(card, "restaurant")
+        ),
+        None,
+    )
+    if landmark is None or any(card is landmark or _same_site(card, landmark) for _block, card in matched):
+        return ""
+    distance = _card_distance_km(landmark)
+    title = normalize_text(landmark.title)
+    today = lisbon_now().date()
+    if (
+        (distance is not None and distance > 2.0)
+        or closed_all_day(hours_for_plan_day(str(landmark.fields.get("Hours", "")), plan_date(brief, today), today))
+        or any(normalize_text(item) and normalize_text(item) in title for item in brief.exclusions)
+    ):
+        return ""
+    sights = [card for _block, card in matched if not card_matches_kind(card, "restaurant")]
+    if len(sights) < 2:
+        return ""
+    return (
+        f'a visit to {brief.activity_areas[0]} leaves out "{landmark.title[:60]}", its best-known landmark; '
+        "add it, replacing a lesser stop only when the time window has no room, and keep the walk in one direction"
+    )
+
+
+# Earliest end of the last stop for a morning or an afternoon that is not left
+# half empty (minutes): about two hours before lunch, or before 19:00.
+_PART_OF_DAY_MIN_END = (
+    (re.compile(r"\b(?:morning|manha)\b"), 11 * 60 + 30),
+    (re.compile(r"\b(?:afternoon|(?<!fim de )(?<!fim da )tarde)\b"), 16 * 60 + 45),
+)
+
+
+def _short_part_of_day_issue(draft: PlanDraft, unused: List[Any], brief: Any) -> str:
+    """Return an issue when a morning or an afternoon plan ends hours before that part of the day.
+
+    "Tomorrow afternoon in Belém" with two stops finished by 15:30 leaves the
+    rest of the afternoon empty while nearby place cards are unused. Plans
+    with an end time, a stated duration, or only the stops the user named are
+    left alone.
+    """
+    window = normalize_text(brief.time_window)
+    if (
+        brief.days > 1
+        or getattr(brief, "end_time", "")
+        or _EVENING_RE.search(window)
+        or re.search(r"\d+\s*(?:h|hours?|horas?)\b", window)
+        or not extra_stops_allowed(brief)
+    ):
+        return ""
+    from agent.utils.geographic_scope import extract_aml_municipality_mentions
+
+    min_end = next((end for pattern, end in _PART_OF_DAY_MIN_END if pattern.search(window)), None)
+    # A neighbourhood is walking scale, a municipality is not (as in the review's area checks).
+    neighbourhood = any(not extract_aml_municipality_mentions(area) for area in brief.activity_areas)
+    radius = _OUTSIDE_NEIGHBOURHOOD_KM if neighbourhood else _AREA_RADIUS_KM
+    nearby = [card for card in unused if (_card_distance_km(card) or 0.0) <= radius]
+    if min_end is None or not nearby:
+        return ""
+    ends = [
+        start + int(block.stay_minutes or DEFAULT_STAY_MINUTES.get(str(block.kind), 45))
+        for block in draft.blocks
+        if (start := _extract_block_start_minutes(block.title)) is not None
+    ]
+    if not ends or max(ends) >= min_end:
+        return ""
+    names = ", ".join(f'"{card.title[:50]}"' for card in nearby[:3])
+    return (
+        f"the plan ends around {max(ends) // 60:02d}:{max(ends) % 60:02d}, leaving most of the {brief.time_window} empty; "
+        f"add one or two nearby stops from the place cards, such as {names}, keeping the walk in one direction"
+    )
+
+
+def _short_day_issue(draft: PlanDraft, matched: List[tuple[Any, Any]], evidence: EvidenceBundle, brief: Any) -> str:
+    """Return an issue when a day ends long before the part of the day it covers.
+
+    A full day (or a day of several) should not end before the afternoon, and
+    a morning or an afternoon should not end hours early. Only raised when
+    unused place cards could fill the gap.
+    """
     chosen = {id(card) for _block, card in matched}
+    # "2 museums" stays two museums: a type whose count is reached is not suggested.
+    full_kinds = [
+        component.kind for component in brief.components
+        if component.count
+        and sum(1 for _block, card in matched if card_matches_kind(card, component.kind)) >= component.count
+    ]
     unused = [
         card for card in evidence.cards
         if id(card) not in chosen
         and getattr(card, "kind", "") == "place"
         and not card_matches_kind(card, "restaurant")
+        and not any(card_matches_kind(card, kind) for kind in full_kinds)
+        and not any(_same_site(card, other) for _block, other in matched)
     ]
     if not unused:
         return ""
+    if brief.days <= 1 and window_stop_target(brief) < 4:
+        return _short_part_of_day_issue(draft, unused, brief)
     last_start: dict[int, int] = {}
     for block in draft.blocks:
         minutes = _extract_block_start_minutes(block.title)
@@ -1149,8 +1404,54 @@ _GENERIC_TITLE_WORDS = {
 }
 
 
-def _direct_answer_issue(draft: PlanDraft, matched: List[tuple[Any, Any]], brief: Any) -> str:
-    """Return an issue when the direct answer names none of the chosen stops.
+def _distinctive_title_tokens(title: str) -> set[str]:
+    """Return the words of a title that identify a place ("jorge" in "Castelo de São Jorge")."""
+    return {token for token in re.findall(r"[a-z0-9]{4,}", normalize_text(title)) if token not in _GENERIC_TITLE_WORDS}
+
+
+def _same_site(first: Any, second: Any) -> bool:
+    """Return whether two cards are parts of one site: within 300 m and sharing a distinctive name word."""
+    a, b = card_coordinates(first), card_coordinates(second)
+    shared = _distinctive_title_tokens(first.title) & _distinctive_title_tokens(second.title)
+    return bool(a and b and shared) and haversine_distance(*a, *b) <= 0.3
+
+
+def _same_site_issue(matched: List[tuple[Any, Any]], evidence: EvidenceBundle) -> str:
+    """Return an issue when two sights are parts of one site while other cards are unused.
+
+    "Castelo de São Jorge", "Miradouro de São Jorge" and "Torre da Igreja do
+    Castelo de São Jorge" are one visit of the castle hill, not three stops.
+    Two sights within 300 m that share a distinctive name word count as one.
+    """
+    sights = [card for _block, card in matched if getattr(card, "kind", "") == "place" and not card_matches_kind(card, "restaurant")]
+    chosen = {id(card) for _block, card in matched}
+    for index, first in enumerate(sights):
+        for second in sights[index + 1:]:
+            if first is second or not _same_site(first, second):
+                continue
+            shared = _distinctive_title_tokens(first.title) & _distinctive_title_tokens(second.title)
+            alternative = next(
+                (
+                    card for card in evidence.cards
+                    if id(card) not in chosen
+                    and getattr(card, "kind", "") == "place"
+                    and not card_matches_kind(card, "restaurant")
+                    and not _distinctive_title_tokens(card.title) & shared
+                    and (_card_distance_km(card) or 0.0) <= _OUTSIDE_NEIGHBOURHOOD_KM
+                ),
+                None,
+            )
+            if alternative is None:
+                return ""
+            return (
+                f'"{first.title[:50]}" and "{second.title[:50]}" are one site; keep one and use another card '
+                f'instead, such as "{alternative.title[:50]}"'
+            )
+    return ""
+
+
+def _direct_answer_issue(draft: PlanDraft, matched: List[tuple[Any, Any]], brief: Any, evidence: EvidenceBundle) -> str:
+    """Return an issue when the direct answer names none of the chosen stops, or a card that is no stop.
 
     Words of the area and the start point do not count: "a day in Sintra"
     does not name the "Palácio Nacional de Sintra".
@@ -1159,14 +1460,32 @@ def _direct_answer_issue(draft: PlanDraft, matched: List[tuple[Any, Any]], brief
     if not answer or not matched:
         return ""
     area_words = set(normalize_text(" ".join([*brief.activity_areas, brief.origin or ""])).split())
+    names_a_stop = False
     for _block, card in matched:
         tokens = [
             token for token in re.findall(r"[a-z0-9]{4,}", normalize_text(card.title))
             if token not in _GENERIC_TITLE_WORDS and token not in area_words
         ]
         if not tokens or any(re.search(rf"\b{re.escape(token)}\b", answer) for token in tokens):
-            return ""
-    return "direct_answer names none of the stops; name the main stops in that sentence"
+            names_a_stop = True
+            break
+    if not names_a_stop:
+        return "direct_answer names none of the stops; name the main stops in that sentence"
+    # "Castelo de São Jorge" in the answer while the stop is the "Miradouro de
+    # São Jorge": a card the plan does not use, unless a stop's name holds it.
+    chosen_titles = [normalize_text(card.title) for _block, card in matched]
+    places = normalize_text(" ".join([*brief.activity_areas, brief.origin or ""]))
+    for card in evidence.cards:
+        title = normalize_text(card.title)
+        if (
+            getattr(card, "kind", "") in {"place", "event"}
+            and len(title) >= 8
+            and title not in places
+            and not any(title in chosen for chosen in chosen_titles)
+            and re.search(rf"\b{re.escape(title)}\b", answer)
+        ):
+            return f'direct_answer names "{card.title[:60]}", which is not one of the stops; name only the planned stops'
+    return ""
 
 
 # "rainy afternoon", "chuvosa", and umbrella advice all claim rain.
@@ -1294,7 +1613,7 @@ def _schedule_travel_issues(matched: List[tuple[Any, Any]]) -> List[str]:
 
 
 def _missing_meal_issues(matched: List[tuple[Any, Any]], evidence: EvidenceBundle, brief: Any) -> List[str]:
-    """Return issues for full days without lunch and evening plans without dinner."""
+    """Return issues for full days without lunch or dinner and evening plans without dinner."""
     food_cards = [
         card for card in evidence.cards
         if getattr(card, "kind", "") not in {"weather", "transport"} and card_matches_kind(card, "restaurant")
@@ -1317,9 +1636,14 @@ def _missing_meal_issues(matched: List[tuple[Any, Any]], evidence: EvidenceBundl
     # The day field ('day after tomorrow', 'dia 12') says when, not how long.
     if brief.days > 1 or is_full_day_window(brief.time_window):
         for day, items in sorted(days.items()):
+            label = f"day {day}" if day else "the day"
             if not has_meal(items, 11 * 60 + 30, 14 * 60 + 45):
-                label = f"day {day}" if day else "the day"
                 issues.append(f"{label} has no lunch stop; add one from the restaurant cards near that day's stops")
+            # Each day of several keeps the full-day shape, ending with dinner.
+            if brief.days > 1 and not (brief.end_time and brief.end_time < "19:30") and not has_meal(items, 18 * 60 + 30, 22 * 60):
+                issues.append(f"{label} has no dinner stop; add one from the restaurant cards near that day's last stop")
+        if full_day_with_evening(brief) and not has_meal(matched, 18 * 60 + 30, 22 * 60):
+            issues.append("the full day has no dinner stop; add one from the restaurant cards near the last afternoon stop")
     elif _EVENING_RE.search(window) and not has_meal(matched, 18 * 60, 23 * 60 + 30):
         issues.append("the evening plan has no dinner stop; add one from the restaurant cards near the other stops")
     return issues
@@ -1362,6 +1686,61 @@ _COMPONENT_LABELS = {
 }
 
 
+_EVENT_TIMING_KEYS = ("Date/Time", "Data/Hora", "When", "Quando", "Schedule", "Horários", "Hours")
+_CLOCK_RE = re.compile(r"\b(\d{1,2})[:h](\d{2})\b")
+_CLOCK_RANGE_RE = re.compile(r"\b\d{1,2}[:h]\d{2}\s*(?:-|–|—|to|até|às|a)\s*\d{1,2}[:h]\d{2}\b")
+
+
+def _event_session_issue(block: Any, card: Any, start_minutes: int) -> str:
+    """Return an issue when an event is planned at a time that is none of its sessions.
+
+    "Fado in Chiado • 17:30 e 19:00" planned at 18:10 or 20:15 is a time the
+    show does not run. Opening hours ("10:00 - 18:00", an exhibition) are not
+    sessions and are left to the opening-hours check.
+    """
+    sessions = _event_sessions(card)
+    if not sessions or any(abs(start_minutes - session) <= _SESSION_TOLERANCE_MINUTES for session in sessions):
+        return ""
+    listed = ", ".join(f"{session // 60:02d}:{session % 60:02d}" for session in sessions[:6])
+    return (
+        f'"{strip_block_time(block.title)[:50]}" starts at {block.title[:5].strip()}, but its sessions are at {listed}; '
+        "start it at one of them and fit the other stops around it"
+    )
+
+
+_SESSION_TOLERANCE_MINUTES = 10
+
+
+def _event_sessions(card: Any) -> List[int]:
+    """Return an event card's session start times in minutes, or [] for opening hours or no times."""
+    fields = getattr(card, "fields", {}) or {}
+    timing = " ".join(str(fields.get(key) or "") for key in _EVENT_TIMING_KEYS)
+    if _CLOCK_RANGE_RE.search(timing):
+        return []
+    return sorted({int(hour) * 60 + int(minute) for hour, minute in _CLOCK_RE.findall(timing) if int(hour) < 24})
+
+
+def snap_events_to_sessions(draft: PlanDraft, evidence: EvidenceBundle) -> PlanDraft:
+    """Move each event block that is off its sessions to the next listed session.
+
+    The repair round may leave "Fado in Chiado" at 17:45 when it runs at 17:30
+    and 19:00; the plan then shows a time the show does not start. The next
+    session (or the last one, when all are earlier) is used; the schedule
+    alignment that follows pushes later stops back if needed.
+    """
+    for block in draft.blocks:
+        card = match_block_to_card(block.title, evidence)
+        if getattr(card, "kind", "") != "event":
+            continue
+        start = _extract_block_start_minutes(block.title)
+        sessions = _event_sessions(card)
+        if start is None or not sessions or any(abs(start - session) <= _SESSION_TOLERANCE_MINUTES for session in sessions):
+            continue
+        target = next((session for session in sessions if session >= start), sessions[-1])
+        block.title = re.sub(r"^\s*\d{1,2}[:h]\d{2}", f"{target // 60:02d}:{target % 60:02d}", block.title, count=1)
+    return draft
+
+
 def untimed_event_notes(draft: PlanDraft, evidence: EvidenceBundle, language: str) -> List[str]:
     """Return a note for each planned event whose card gives no session time.
 
@@ -1382,8 +1761,8 @@ def untimed_event_notes(draft: PlanDraft, evidence: EvidenceBundle, language: st
         if card is None or getattr(card, "kind", "") != "event":
             continue
         fields = getattr(card, "fields", {}) or {}
-        timing = " ".join(str(fields.get(key) or "") for key in ("Date/Time", "Data/Hora", "When", "Quando", "Schedule", "Horários", "Hours"))
-        if re.search(r"\b\d{1,2}[:h]\d{2}\b", timing):
+        timing = " ".join(str(fields.get(key) or "") for key in _EVENT_TIMING_KEYS)
+        if _CLOCK_RE.search(timing):
             continue
         name = strip_block_time(block.title)
         notes.append(
@@ -1474,6 +1853,8 @@ def review_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, brief: Any) ->
             continue
         matched.append((block, card))
         distance = _card_distance_km(card)
+        # A sight is never replaced by a restaurant, nor a meal by a sight.
+        is_meal = card_matches_kind(card, "restaurant")
         if brief.activity_areas and distance is not None and distance > _AREA_RADIUS_KM:
             # A stop of the same type inside the area, or clearly closer to it.
             closer = sorted(
@@ -1483,6 +1864,8 @@ def review_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, brief: Any) ->
                     and getattr(other, "kind", "") not in {"weather", "transport"}
                     and (_card_distance_km(other) or 99.0) <= max(_AREA_RADIUS_KM, distance - 0.5)
                     and card_matches_kind(other, _block_component_kind(block, card))
+                    and card_matches_kind(other, "restaurant") == is_meal
+                    and all(match_block_to_card(other_block.title, evidence) is not other for other_block in draft.blocks)
                 ),
                 key=lambda other: _card_distance_km(other) or 99.0,
             )
@@ -1501,6 +1884,7 @@ def review_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, brief: Any) ->
                     and getattr(other, "kind", "") not in {"weather", "transport"}
                     and (_card_distance_km(other) or 99.0) <= _INSIDE_NEIGHBOURHOOD_KM
                     and card_matches_kind(other, _block_component_kind(block, card))
+                    and card_matches_kind(other, "restaurant") == is_meal
                     and all(match_block_to_card(other_block.title, evidence) is not other for other_block in draft.blocks)
                 ),
                 key=lambda other: _card_distance_km(other) or 99.0,
@@ -1515,14 +1899,38 @@ def review_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, brief: Any) ->
         start_minutes = _extract_block_start_minutes(block.title)
         block_day = day_of_plan + timedelta(days=max(0, int(getattr(block, "day", 0) or 1) - 1))
         hours_text = hours_for_plan_day(str((getattr(card, "fields", {}) or {}).get("Hours", "")), block_day, today)
-        if start_minutes is not None and open_at(hours_text, start_minutes) is False:
+        if start_minutes is not None and closed_all_day(hours_text):
+            day_label = f"on day {block.day}" if brief.days > 1 and getattr(block, "day", 0) else "that day"
+            other_day = "move it to a day when it is open or choose another card" if brief.days > 1 else "choose another card"
+            repairable.append(f'"{card.title[:60]}" is closed all day {day_label} (hours: {hours_text[:40]}); {other_day}')
+        elif start_minutes is not None and open_at(hours_text, start_minutes) is False:
             repairable.append(
                 f'"{card.title[:60]}" is closed at {block.title[:5].strip()} (hours: {hours_text[:40]}); move it inside its hours or choose another card'
             )
+        elif start_minutes is not None and getattr(card, "kind", "") == "event":
+            session_issue = _event_session_issue(block, card, start_minutes)
+            if session_issue:
+                repairable.append(session_issue)
+        elif start_minutes is not None:
+            # A museum reached at 17:58 that closes at 18:00 is no visit; the
+            # real legs then push it past closing.
+            visit = min(block.stay_minutes or DEFAULT_STAY_MINUTES.get(block.kind, 45), 30)
+            if open_at(hours_text, min(start_minutes + visit, 24 * 60 - 1)) is False:
+                repairable.append(
+                    f'"{card.title[:60]}" closes too soon after {block.title[:5].strip()} (hours: {hours_text[:40]}); '
+                    "move it earlier inside its hours or choose another card"
+                )
 
     if not matched:
         critical.append("no stop matches an evidence card")
-    direct_issue = _direct_answer_issue(draft, matched, brief)
+    # The same card twice (the castle on both days, one restaurant for two
+    # meals): the copy is dropped later and leaves a hole in the day.
+    repeated = list(dict.fromkeys(card.title for index, (_block, card) in enumerate(matched) if any(card is other for _b, other in matched[:index])))
+    if repeated:
+        repairable.append(
+            f'"{repeated[0][:60]}" is used for more than one stop; each card is one stop, so use a different card for the repeat'
+        )
+    direct_issue = _direct_answer_issue(draft, matched, brief, evidence)
     if direct_issue:
         repairable.append(direct_issue)
     short_day_issue = _short_day_issue(draft, matched, evidence, brief) if matched else ""
@@ -1533,7 +1941,10 @@ def review_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, brief: Any) ->
         repairable.append(past_start_issue)
     for issue in (
         _late_start_issue(draft, brief),
-        _long_gap_issue(matched, brief),
+        _late_full_day_start_issue(draft, brief),
+        _long_gap_issue(matched, brief, evidence),
+        _landmark_issue(matched, evidence, brief),
+        _same_site_issue(matched, evidence),
         _event_meal_distance_issue(matched, evidence),
     ):
         if issue:
@@ -1582,7 +1993,7 @@ def review_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, brief: Any) ->
     sunset_issue = _sunset_viewpoint_issue(draft, brief)
     if sunset_issue:
         repairable.append(sunset_issue)
-    zigzag_issue = _zigzag_issue(matched) or _spread_issue(matched, evidence, brief)
+    zigzag_issue = _zigzag_issue(matched) or _spread_issue(matched, evidence, brief) or _visit_order_issue(matched)
     if zigzag_issue:
         repairable.append(zigzag_issue)
     repairable.extend(_missing_meal_issues(matched, evidence, brief))

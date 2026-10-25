@@ -60,6 +60,7 @@ from tools.utils import haversine_distance
 # Import from the split modules
 from tools.metrolisboa_api import (
     METRO_LINES,
+    METRO_STATIONS,
     fetch_json_with_retry,
     get_landmark_info,
     get_metro_live_service_evidence,
@@ -135,10 +136,70 @@ def _strip_transport_endpoint_qualifier(location: str) -> str:
     return cleaned or raw
 
 
+# The start of a place name that a route connector ("de", "do", "da") sits
+# inside: "Cais" in "Cais do Sodré para Belém", "Rua" in "Rua da Prata 50 para
+# o Saldanha". Capitalized words or street words only, never a sentence
+# opener such as "E" or "Como".
+_ROUTE_NAME_HEAD_RE = re.compile(
+    r"(?!(?:E|O|A|Os|As|Eu|Como|Qual|Quais|Quero|Queria|Preciso|Vou|Posso|Hoje|Amanh[ãa]|Agora|Ent[ãa]o|Ok|Sim|N[ãa]o|"
+    r"Mas|Depois|Para|Por|Se|I|How|What|And|Can|Then|Now|Today|Tomorrow)\b)"
+    r"(?:(?i:rua|avenida|av\.?|pra[cç]a|largo|travessa|cal[cç]ada|campo|cais|esta[cç][aã]o|gare|estrada|alameda|"
+    r"parque|jardim|miradouro|bairro|quinta)|[A-ZÀ-Ý][\w'’.-]*)"
+    r"(?:\s+(?:[A-ZÀ-Ý][\w'’.-]*|de|do|da|dos|das|\d+[A-Za-z]?))*"
+)
+
+
+def origin_with_name_head(text: str, match: re.Match) -> str:
+    """Return a route match's origin with the start of its name put back.
+
+    A connector pattern such as ``do <origin> para <destination>`` also
+    matches inside a name: "Cais do Sodré para Belém" yields "Sodré". When all
+    the text before the connector is the start of a place name, it belongs to
+    the origin.
+
+    Args:
+        text: Text the pattern was searched in.
+        match: Match with an ``origin`` group.
+
+    Returns:
+        The origin text, with the name's start when it was cut off.
+    """
+    if _ROUTE_NAME_HEAD_RE.fullmatch(text[: match.start()].strip()):
+        return f"{text[: match.start('origin')].strip()} {match.group('origin')}"
+    return match.group("origin")
+
+
+_STATION_WORDING_RE = re.compile(
+    r"(?i)^(?:(?:a|the)\s+)?(?:esta[cç][aã]o|gare|station)(?:\s+(?:de\s+)?metro)?(?:\s+(?:de|do|da|dos|das|of))?\s+"
+    r"|\s+(?:metro\s+)?(?:station|esta[cç][aã]o)$"
+)
+
+
 def _canonical_metro_station_name(station_name: str) -> str:
     """Return the official Metro station name for known user-facing aliases."""
     raw = _strip_transport_endpoint_qualifier(station_name)
-    return _METRO_STATION_ALIASES.get(_normalize_station(raw), raw)
+    key = _normalize_station(raw)
+    if key in _METRO_STATION_ALIASES:
+        return _METRO_STATION_ALIASES[key]
+    if get_station_lines(raw):
+        return raw
+    # A station named after two places ("Baixa-Chiado", "Colégio Militar/Luz")
+    # is the station of each of them: "Baixa" alone is Baixa-Chiado.
+    # The table holds accented and unaccented spellings of the same station;
+    # in sorted order the accented one comes last and is kept.
+    matches = {
+        _normalize_station(name): name.title() for name in sorted(METRO_STATIONS)
+        if re.search(r"[-/]", name) and key in {_normalize_station(part) for part in re.split(r"[-/]", name)}
+    }
+    if len(matches) == 1:
+        return next(iter(matches.values()))
+    # "Gare do Oriente", "Estação de Santa Apolónia", "Cais do Sodré station".
+    bare = _STATION_WORDING_RE.sub("", raw).strip()
+    if bare and bare != raw:
+        canonical = _canonical_metro_station_name(bare)
+        if get_station_lines(canonical):
+            return canonical
+    return raw
 
 
 def _format_metro_line_suffix(line_value: str) -> str:

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sqlite3
@@ -59,7 +60,7 @@ def _utc_now_iso() -> str:
 def _count_rows(db_path: Path, table: str) -> int:
     """Count rows in a SQLite table, returning 0 when unavailable."""
     try:
-        with sqlite3.connect(str(db_path)) as connection:
+        with contextlib.closing(sqlite3.connect(str(db_path))) as connection:
             row = connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
     except sqlite3.Error:
         return 0

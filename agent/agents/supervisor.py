@@ -16,7 +16,13 @@ from typing import Any, Dict, List, Optional
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent.agents.base import BaseAgent, clean_response, parse_json_response
-from agent.planning.brief import PlanBrief, build_plan_brief_messages, parse_plan_brief, roll_past_window_to_tomorrow
+from agent.planning.brief import (
+    PlanBrief,
+    build_plan_brief_messages,
+    fill_stated_day,
+    parse_plan_brief,
+    roll_past_window_to_tomorrow,
+)
 from agent.prompts.supervisor import get_supervisor_prompt
 from agent.utils.geographic_scope import (
     build_geographic_out_of_scope_response,
@@ -34,6 +40,22 @@ _PLAN_STOP_WORDS = (
     r"(?:almo[cç]o|lunch|jantar|dinner|miradouros?|viewpoints?|jardi(?:m|ns)|gardens?|caf[eé]s?|coffee|"
     r"restaurantes?|restaurants?|museus?|museums?|igrejas?|churche?s?|livrarias?|bookshops?|mercados?|markets?|"
     r"praias?|beach(?:es)?|monumentos?|monuments?|castelos?|castles?|pal[aá]cios?|palaces?|pastelarias?|pastry)"
+)
+# A route written as two place names and nothing else ("rossio para belem", "saldanha to oriente"),
+# matched on normalized text; requests that start with a question, a verb or a topic are left out.
+_TERSE_ROUTE_RE = re.compile(
+    r"^(?!(?:como|qual|quais|quando|onde|o que|quero|queria|preciso|tenho|ha|existe|sugere|recomenda|planeia|"
+    r"mostra|diz|da|proxim[oa]s?|horarios?|bilhetes?|ideias|dicas|sugestoes|planos?|roteiros?|programa|coisas|"
+    r"atividades|what|how|where|when|which|is|are|can|could|i|show|tell|give|find|suggest|recommend|plan|next|"
+    r"tickets?|ideas|tips|things)\b)"
+    r"(?:[a-z0-9'-]+ ){0,4}[a-z0-9'-]+ (?:para|ate|to) (?:o |a |os |as |the )?(?:[a-z0-9'-]+ ){0,4}[a-z0-9'-]+$"
+)
+_TERSE_ROUTE_TOPIC_RE = re.compile(
+    r"\b(?:restaurantes?|restaurants?|museus?|museums?|eventos?|events?|jantar|dinner|almoco|lunch|"
+    r"hoje|today|amanha|tomorrow|fim de semana|weekend|criancas|kids|familia|family|comida|food|levar|"
+    r"take away|takeaway|prendas?|presentes?|gifts?|lembrancas?|souvenirs?|compras|shopping|fado|turistas|"
+    r"tourists|casal|casais|couples?|grupos?|groups?|vegetarian[oa]?s?|vegan[oa]?s?|idosos|seniors?|estudantes|"
+    r"students?|noite|night|bebes|babies|caes|dogs?|pets?|dicas|tips|ideias|ideas)\b"
 )
 
 
@@ -83,7 +105,7 @@ class SupervisorAgent(BaseAgent):
             return None
         from tools.utils import lisbon_now
 
-        return roll_past_window_to_tomorrow(brief, lisbon_now())
+        return roll_past_window_to_tomorrow(fill_stated_day(brief, user_message), lisbon_now())
 
     @staticmethod
     def _normalize_query(user_message: str) -> str:
@@ -374,6 +396,8 @@ class SupervisorAgent(BaseAgent):
     def _looks_like_transport_query(cls, message_lower: str) -> bool:
         """Detects transport and routing queries from natural PT/EN phrasing, not only explicit mode words."""
         normalized = cls._normalize_query(message_lower)
+        if _TERSE_ROUTE_RE.match(normalized) and not _TERSE_ROUTE_TOPIC_RE.search(normalized):
+            return True
         has_carris_route_code = bool(
             re.search(r"\b\d{1,4}e\b", normalized, flags=re.IGNORECASE)
             or re.search(
@@ -1308,6 +1332,14 @@ class SupervisorAgent(BaseAgent):
                 "agents": ["transport"],
                 "direct_response": None,
             }
+        normalized_message = cls._normalize_query(message_lower)
+        if _TERSE_ROUTE_RE.match(normalized_message) and not _TERSE_ROUTE_TOPIC_RE.search(normalized_message):
+            # Two place names only: a place word in a name ("Parque das Nações") is not a place lookup.
+            return {
+                "reasoning": "Direct terse route override",
+                "agents": ["transport"],
+                "direct_response": None,
+            }
         if weather_hit and transport_hit and cls._weather_reference_is_route_modifier(message_lower):
             weather_hit = False
         exact_event_hit = any(
@@ -1953,6 +1985,13 @@ class SupervisorAgent(BaseAgent):
         )
         if (len(stop_types) >= 2 or counted_stops) and (time_budget or move_between):
             return True
+        # "Tenho a manhã livre amanhã em Alfama, o que posso fazer?" asks to fill the free time.
+        if time_budget and re.search(
+            r"\b(?:what (?:can|should|could) (?:i|we) (?:see|do|visit)|o que (?:posso|podemos|devo|devemos|ha para) "
+            r"(?:ver|fazer|visitar)|suggest\w*|sugere\w*|sugest\w*|ideas?|ideias?)\b",
+            message_lower,
+        ):
+            return True
         # "Quero um dia em Sintra com o Palácio da Pena, a Quinta da Regaleira e
         # almoço, a partir do Rossio": a list of stops (at least one of a known
         # type) for a day or part of the day, from a start place (not a clock
@@ -2279,8 +2318,11 @@ class SupervisorAgent(BaseAgent):
             # Explicit requests to plan or order visits, or a time budget for
             # visiting, are itineraries even when weather and transport are named.
             r"\bplan\s+(?:the\s+|my\s+|our\s+)?(?:visits?|stops?|order|route|afternoon|morning|evening)\b",
+            # "Plan a visit to Belém, considering the weather and how to get there"
+            # is a plan whose first leg is the route; "plan a route" stays a route.
+            r"\bplan\s+(?:a|an)\s+(?:\w+\s+)?(?:visits?|afternoon|morning|evening|trip|tour|outing)\b",
             r"\b(?:in\s+order|por\s+ordem|pela\s+ordem)\b",
-            r"\b(?:planeia|planear|organiza|organizar)\b",
+            r"\b(?:planeia|planeie|planear|organiza|organizar)\b",
             r"\b(?:\d{1,2}|two|three|four|five|six|duas|tres|três|quatro|cinco|seis)\s+(?:hours?|horas)\b.*\b(?:visit|visitar|visitas?|plan|plano|roteiro)\b",
         ]
         if any(re.search(pattern, normalized) for pattern in full_planning_markers):

@@ -20,6 +20,7 @@
 # Required libraries:
 # pip install requests langchain-core
 
+import contextlib
 import csv
 import io
 import json
@@ -360,7 +361,7 @@ class CPGTFSManager:
             return False
 
         try:
-            with sqlite3.connect(str(self.db_path)) as conn:
+            with contextlib.closing(sqlite3.connect(str(self.db_path))) as conn:
                 count = conn.execute("SELECT COUNT(*) FROM stops").fetchone()[0]
             return int(count or 0) > 0
         except sqlite3.Error as exc:

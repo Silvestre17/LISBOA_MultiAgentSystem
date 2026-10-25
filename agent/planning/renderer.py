@@ -53,7 +53,14 @@ def render_plan_markdown(
             lines.append(f"    - {item}")
 
     multi_day = len({block.day for block in draft.blocks if getattr(block, "day", 0)}) > 1
-    visible_blocks = draft.blocks[:12] if multi_day else draft.blocks[:8]
+    # At most eight stops a day, the size of a full day with dinner.
+    per_day: Dict[int, int] = {}
+    visible_blocks = []
+    for block in draft.blocks:
+        day = int(getattr(block, "day", 0) or 0) if multi_day else 0
+        per_day[day] = per_day.get(day, 0) + 1
+        if per_day[day] <= 8:
+            visible_blocks.append(block)
     if visible_blocks:
         lines.extend(["", "---", "", f"### 📍 **{'Roteiro sugerido' if is_pt else 'Suggested route'}**"])
         current_day = None

@@ -527,6 +527,126 @@ def carris_option_sentence(options: List[CarrisOption], language: str, user_mess
     return fallback_note + sentence + "."
 
 
+_CARD_FIELD_RE = re.compile(r"^\s*(?:[-*]\s+)?(?:[^\w\s*]+\s*)?\*\*(?P<label>[^*\n]+?):?\*\*:?\s*(?P<value>.+)$")
+_RENDERED_CARRIS_LINE_RE = re.compile(
+    r"^(?P<line>\d{1,4}[A-Z]?)\b\s*(?:[—–-]\s*)?(?:(?:dire[çc][ãa]o|direction|towards|para|to)\s+(?P<headsign>.+))?$",
+    re.IGNORECASE,
+)
+_METRO_LEG_RE = re.compile(
+    r"\*\*(?:Linha\s+(?P<pt>Azul|Verde|Vermelha|Amarela)|(?P<en>Blue|Green|Red|Yellow)\s+Line)\*\*\s*[-–—]\s*"
+    r"(?:dire[çc][ãa]o|direction|towards)\s*\*\*(?P<direction>[^*]+)\*\*",
+    re.IGNORECASE,
+)
+_METRO_BOARD_RE = re.compile(r"(?m)(?:Board at|Embarque na esta[çc][ãa]o|Embarque em|Walk to)\s+\**([^*\n]+?)\**\s*$")
+_METRO_TRANSFER_RE = re.compile(r"(?:Transfer at|Transfer[êe]ncia em|Transbordo em)\s+\**([^*\n(]+?)\**\s*(?:\(|$)", re.MULTILINE)
+_METRO_EXIT_RE = re.compile(r"(?m)(?:Exit at|Saia na esta[çc][ãa]o|Sair em)\s+\**([^*\n]+?)\**\s*$")
+
+
+def _ascii_lower(value: str) -> str:
+    """Return ``value`` lower-cased without accents."""
+    return unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii").lower().strip()
+
+
+def _rendered_carris_option(text: str) -> Tuple[Optional[CarrisOption], int]:
+    """Read a Carris option written as a card ("**Carris ...:** 15E — direção **X**", "**Embarque:** Y").
+
+    Returns:
+        The option (or None) and the position of its line in ``text``.
+    """
+    option: Optional[CarrisOption] = None
+    position = -1
+    offset = 0
+    for raw_line in text.splitlines():
+        line_start = offset
+        offset += len(raw_line) + 1
+        match = _CARD_FIELD_RE.match(raw_line)
+        if not match:
+            continue
+        label = _ascii_lower(match.group("label"))
+        value = match.group("value").replace("**", "").strip()
+        if option is None:
+            line_match = _RENDERED_CARRIS_LINE_RE.match(value) if "carris" in label else None
+            if line_match:
+                headsign = (line_match.group("headsign") or "").strip().rstrip(".")
+                option = CarrisOption(line=line_match.group("line").upper(), headsign=headsign)
+                position = line_start
+            continue
+        first_part = re.split(r"[,;]", value)[0].strip().rstrip(".")
+        if label in {"embarque", "board", "boarding", "board at", "apanha em"} and not option.board:
+            option.board = first_part
+        elif label in {"saida", "exit", "exit at", "alight", "alight at", "sai em", "sair em"} and not option.alight:
+            option.alight = first_part
+        elif re.match(r"(?:tempo em veiculo|in-vehicle time|travel time|tempo estimado)", label) and option.minutes is None:
+            minutes = re.search(r"(\d+)\s*min", value)
+            option.minutes = int(minutes.group(1)) if minutes else None
+        elif re.match(r"(?:proximas partidas|next departures)", label) and not option.departures:
+            option.departures = departure_times(value)
+    if option is None or not (option.board and option.alight):
+        return None, -1
+    return option, position
+
+
+def _metro_route_sentence(text: str, language: str) -> Tuple[str, int]:
+    """Summarize a rendered Metro route (lines with directions, transfer, exit) in one sentence.
+
+    Returns:
+        The sentence (or "") and the position of the first line leg in ``text``.
+    """
+    legs = list(_METRO_LEG_RE.finditer(text))
+    exit_match = _METRO_EXIT_RE.search(text)
+    if not legs or not exit_match:
+        return "", -1
+    is_pt = language == "pt"
+    names = []
+    for leg in legs[:2]:
+        colour = leg.group("pt") or leg.group("en")
+        local = _localize_line(colour, language) if is_pt != bool(leg.group("pt")) else colour.title()
+        names.append((f"Linha {local}" if is_pt else f"{local} Line", _station_name(leg.group("direction"))))
+    board = _METRO_BOARD_RE.search(text)
+    transfer = _METRO_TRANSFER_RE.search(text)
+    exit_station = _station_name(exit_match.group(1).rstrip("."))
+    first_line, first_direction = names[0]
+    if is_pt:
+        sentence = f"Apanha o Metro na **{first_line}** (direção {first_direction})"
+        if board:
+            sentence += f" em **{_station_name(board.group(1).rstrip('.'))}**"
+        if transfer and len(names) > 1:
+            sentence += f", muda em **{_station_name(transfer.group(1))}** para a **{names[1][0]}** (direção {names[1][1]})"
+        return sentence + f" e sai em **{exit_station}**.", legs[0].start()
+    sentence = f"Take the Metro **{first_line}** (towards {first_direction})"
+    if board:
+        sentence += f" from **{_station_name(board.group(1).rstrip('.'))}**"
+    if transfer and len(names) > 1:
+        sentence += f", change at **{_station_name(transfer.group(1))}** to the **{names[1][0]}** (towards {names[1][1]})"
+    return sentence + f" and exit at **{exit_station}**.", legs[0].start()
+
+
+def route_option_sentence(text: str, language: str, user_message: str = "") -> str:
+    """Return a direct-answer sentence naming the main option of a route answer, or "".
+
+    Reads Carris options in the route tool's format, a Carris option written
+    as a card, and a Metro route with its lines; when an answer has both a
+    Carris and a Metro option, the one listed first is named.
+
+    Args:
+        text: Route answer or route tool output.
+        language: Output language (``pt`` or ``en``).
+        user_message: The request, to read a requested vehicle from.
+
+    Returns:
+        A sentence such as "Apanha o elétrico **15E** ... em **Pç. Figueira** ...", or "".
+    """
+    text = str(text or "")
+    tool_options = extract_carris_options(text)
+    if tool_options:
+        return carris_option_sentence(tool_options, language, user_message)
+    carris, carris_position = _rendered_carris_option(text)
+    metro, metro_position = _metro_route_sentence(text, language)
+    if carris and (not metro or carris_position < metro_position):
+        return carris_option_sentence([carris], language, user_message)
+    return metro
+
+
 def parse_leg_endpoint(value: Optional[str]) -> str:
     """Strip Markdown link syntax so an address can be geocoded."""
     text = str(value or "").strip()

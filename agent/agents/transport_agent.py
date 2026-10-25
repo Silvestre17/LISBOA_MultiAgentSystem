@@ -446,6 +446,14 @@ def _clean_query_fragment(part: str) -> str:
         part,
         flags=re.IGNORECASE,
     )
+    # What those words leave in front of the name ("Estação do Oriente"), and
+    # a part of the day read as the start of the origin ("de manhã do Rossio").
+    part = re.sub(
+        r"^\s*(?:(?:manh[ãa]|tarde|noite)\s+)?(?:de|do|da|dos|das|of)\s+",
+        "",
+        part,
+        flags=re.IGNORECASE,
+    )
     # Route patterns like "do Saldanha para a Amadora" can be partially
     # captured by a broader "do X a Y" parser, leaving a dangling connector in
     # the origin ("Saldanha para"). Drop terminal connectors before resolution.
@@ -1526,6 +1534,13 @@ def _extract_route_endpoints(
         r"\bfrom\s+(?P<origin>.+?)\s+to\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
         r"\bbetween\s+(?P<origin>.+?)\s+and\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
         r"\bentre\s+(?P<origin>.+?)\s+e\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
+        # Terse requests without a verb: "Rossio para Belém", "Saldanha to Oriente by metro".
+        r"^\s*(?!(?:como|qual|quais|quando|onde|o\s+que|quero|queria|preciso|tenho|h[aá]|existe|sugere|recomenda|"
+        r"planeia|mostra|diz|d[aá]|pr[oó]xim[oa]s?|hor[aá]rios?|bilhetes?|what|how|where|when|which|is|are|can|"
+        r"could|i|show|tell|give|find|suggest|recommend|plan|next|tickets?)\b)"
+        r"(?P<origin>[^\?\!\.,;]{3,60}?)\s+(?:para|at[eé]|to)\s+(?:o\s+|a\s+|os\s+|as\s+|the\s+)?"
+        r"(?P<destination>[^\?\!\.,;]{3,60}?)"
+        r"(?:\s+(?:de|by|on)\s+(?:metro|comboio|autocarro|el[eé]trico|bus|train|tram))?\s*(?:[\?\!\.,;]|$)",
     ]
 
     def _valid_endpoint(value: str) -> bool:
@@ -1574,10 +1589,15 @@ def _extract_route_endpoints(
             return False
         return True
 
+    from tools.transport_api import origin_with_name_head
+
     for pattern in patterns:
         match = re.search(pattern, route_text, flags=re.IGNORECASE)
         if match:
-            origin = _clean_query_fragment(match.group("origin"))
+            # A bare connector ("do <origin> para") can sit inside the origin's
+            # name: "Cais do Sodré para Belém".
+            bare_connector = bool(re.match(r"\\b(?:d[eoa]s?)\\s", pattern))
+            origin = _clean_query_fragment(origin_with_name_head(route_text, match) if bare_connector else match.group("origin"))
             destination = _clean_query_fragment(match.group("destination"))
             if collapse_generic_service_area:
                 destination = _generic_service_area_endpoint(destination) or destination
@@ -2371,10 +2391,10 @@ def _drop_live_departures_for_another_day(response: str, user_message: str, lang
 
 
 def _best_carris_option_sentence(response: str, language: str, user_message: str = "") -> str:
-    """Summarize the fastest Carris option listed in an answer, or return "" (see ``carris_option_sentence``)."""
-    from agent.planning.legs import carris_option_sentence, extract_carris_options
+    """Summarize the main Carris or Metro option listed in an answer, or return "" (see ``route_option_sentence``)."""
+    from agent.planning.legs import route_option_sentence
 
-    return carris_option_sentence(extract_carris_options(response), language, user_message)
+    return route_option_sentence(response, language, user_message)
 
 
 def _ensure_transport_direct_answer_block(
@@ -2528,8 +2548,15 @@ def _is_generic_public_transport_route_query(user_message: str) -> bool:
     ]
     if any(marker in normalized for marker in generic_markers):
         return True
-    if not _extract_route_endpoints(user_message):
+    endpoints = _extract_route_endpoints(user_message)
+    if not endpoints:
         return False
+    # Only the two places ("Rossio para Belém") names no mode either.
+    remainder = normalized
+    for endpoint in endpoints:
+        remainder = remainder.replace(_normalize_token(endpoint), " ")
+    if not re.sub(r"\b(?:para|ate|to|o|a|os|as|the|de|do|da|dos|das|from)\b|[^\w]", " ", remainder).strip():
+        return True
     return bool(
         re.search(
             r"\b(?:como\s+(?:posso\s+)?(?:ir|vou|chego)|quero\s+(?:ir|chegar)|"
@@ -4160,7 +4187,9 @@ def _build_mode_filtered_carris_route_response(
         source = f"📌 **Source:** [*Carris*](https://www.carris.pt) | **Updated:** {datetime.now().strftime('%H:%M')}"
 
     parts = [title, "", direct]
-    if requested_clock:
+    include_recommended = bool(recommended) and not (asks_other_same_mode and option_count <= 1)
+    # The recommended option already states the requested time.
+    if requested_clock and not include_recommended:
         parts.extend([
             "",
             (
@@ -4169,7 +4198,6 @@ def _build_mode_filtered_carris_route_response(
                 else f"🕒 **Requested time:** showing scheduled departures from **{requested_clock}**."
             ),
         ])
-    include_recommended = bool(recommended) and not (asks_other_same_mode and option_count <= 1)
     if include_recommended:
         parts.extend(["", recommended])
     parts.extend(["", "---", "", section, "", selected_markdown, "", source])
@@ -4258,7 +4286,13 @@ def _build_carris_surface_route_response(
     )
     parts = [title, "", direct]
     requested_clock = _extract_requested_departure_clock(user_message)
-    if requested_clock:
+    recommended = _summarize_recommended_carris_option(
+        bus_markdown or tram_markdown,
+        language,
+        scheduled_from=requested_clock,
+    )
+    # The recommended option, when shown, already states the requested time.
+    if requested_clock and (alternative_requested or not recommended):
         parts.extend([
             "",
             (
@@ -4285,12 +4319,6 @@ def _build_carris_surface_route_response(
                 "for this origin/destination in the available Carris data, so I show confirmed Carris alternatives."
             ),
         ])
-    requested_clock = _extract_requested_departure_clock(user_message)
-    recommended = _summarize_recommended_carris_option(
-        bus_markdown or tram_markdown,
-        language,
-        scheduled_from=requested_clock,
-    )
     if recommended and not alternative_requested:
         # The best option (and its next departure) is the direct answer.
         direct_line, remaining = _direct_line_from_recommended_option(recommended, language)
@@ -8203,11 +8231,20 @@ def _metro_bus_direct_answer(metro_response: str, carris_response: str, language
         r"(?:[^·\n]*·\s*\*\*~?\s*(?P<minutes>\d+)\s*min)?",
         carris_response or "",
     )
-    if not (metro_minutes and bus):
+    if not metro_minutes:
         return ""
+    if bus:
+        line = bus.group("line").strip()
+        bus_value = int(bus.group("minutes")) if bus.group("minutes") else None
+    else:
+        # No departure today, so no "best confirmed option" line: name the first listed bus.
+        from agent.planning.legs import extract_carris_options
+
+        options = extract_carris_options(carris_response)
+        if not options:
+            return ""
+        line, bus_value = options[0].line, options[0].minutes
     metro_value = int(metro_minutes.group(1))
-    bus_value = int(bus.group("minutes")) if bus.group("minutes") else None
-    line = bus.group("line").strip()
     if bus_value is not None:
         # The bus time is in-vehicle only; add its walks to and from the stops
         # so it compares with the Metro's total.
