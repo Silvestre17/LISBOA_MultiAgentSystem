@@ -44,6 +44,7 @@ from agent.planning.compose import (
     drop_extra_counted_stops,
     drop_operator_cards,
     drop_topic_cards,
+    forget_dropped_stops,
     label_meal_stops,
     order_blocks_by_time,
     other_event_options,
@@ -52,7 +53,14 @@ from agent.planning.compose import (
     resolve_plan_legs,
 )
 from agent.planning.prompts import build_brief_plan_messages
-from agent.planning.quality import review_plan_draft, snap_events_to_sessions, unmet_component_notes, untimed_event_notes
+from agent.planning.quality import (
+    match_block_to_card,
+    review_plan_draft,
+    snap_events_to_sessions,
+    strip_block_time,
+    unmet_component_notes,
+    untimed_event_notes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -13962,9 +13970,20 @@ class PlannerAgent(BaseAgent):
         if draft is None or critical:
             return ""
 
+        drafted = [(strip_block_time(block.title), match_block_to_card(block.title, evidence)) for block in draft.blocks]
         draft = drop_extra_counted_stops(drop_duplicate_stops(curate_block_details(draft, evidence, brief, language)), evidence, brief)
         if not draft.blocks:
             return ""
+        kept_card_ids = {id(match_block_to_card(block.title, evidence)) for block in draft.blocks}
+        dropped_stops = [(title, card) for title, card in drafted if card is None or id(card) not in kept_card_ids]
+        forget_dropped_stops(
+            draft,
+            [title for title, _ in dropped_stops],
+            [card for _, card in dropped_stops],
+            evidence,
+            brief,
+            language,
+        )
         draft = order_blocks_by_time(snap_events_to_sessions(draft, evidence))
         draft = clean_plan_notes(draft, brief, language)
         draft = drop_closed_stops(draft, evidence, brief, language)

@@ -532,6 +532,11 @@ _RENDERED_CARRIS_LINE_RE = re.compile(
     r"^(?P<line>\d{1,4}[A-Z]?)\b\s*(?:[—–-]\s*)?(?:(?:dire[çc][ãa]o|direction|towards|para|to)\s+(?P<headsign>.+))?$",
     re.IGNORECASE,
 )
+# "- **Opção 1 — 15E (elétrico)**:" heads an option written as a list.
+_LISTED_OPTION_RE = re.compile(
+    r"^\s*[-*]\s+\*\*(?:Op[çc][ãa]o|Option)\s*\d*\s*[—–:-]\s*(?P<line>\d{1,4}[A-Z]?)\b[^*\n]*\*\*",
+    re.IGNORECASE,
+)
 _METRO_LEG_RE = re.compile(
     r"\*\*(?:Linha\s+(?P<pt>Azul|Verde|Vermelha|Amarela)|(?P<en>Blue|Green|Red|Yellow)\s+Line)\*\*\s*[-–—]\s*"
     r"(?:dire[çc][ãa]o|direction|towards)\s*\*\*(?P<direction>[^*]+)\*\*",
@@ -548,7 +553,8 @@ def _ascii_lower(value: str) -> str:
 
 
 def _rendered_carris_option(text: str) -> Tuple[Optional[CarrisOption], int]:
-    """Read a Carris option written as a card ("**Carris ...:** 15E — direção **X**", "**Embarque:** Y").
+    """Read a Carris option written as a card ("**Carris ...:** 15E — direção **X**", "**Embarque:** Y")
+    or as a list ("**Opção 1 — 15E (elétrico)**:", "**Embarque** em **Y**").
 
     Returns:
         The option (or None) and the position of its line in ``text``.
@@ -559,6 +565,11 @@ def _rendered_carris_option(text: str) -> Tuple[Optional[CarrisOption], int]:
     for raw_line in text.splitlines():
         line_start = offset
         offset += len(raw_line) + 1
+        listed = _LISTED_OPTION_RE.match(raw_line) if option is None else None
+        if listed:
+            option = CarrisOption(line=listed.group("line").upper(), headsign="")
+            position = line_start
+            continue
         match = _CARD_FIELD_RE.match(raw_line)
         if not match:
             continue
@@ -571,10 +582,10 @@ def _rendered_carris_option(text: str) -> Tuple[Optional[CarrisOption], int]:
                 option = CarrisOption(line=line_match.group("line").upper(), headsign=headsign)
                 position = line_start
             continue
-        first_part = re.split(r"[,;]", value)[0].strip().rstrip(".")
+        first_part = re.sub(r"^(?:em|no|na|at|in)\s+", "", re.split(r"[,;]", value)[0].strip().rstrip("."), flags=re.IGNORECASE)
         if label in {"embarque", "board", "boarding", "board at", "apanha em"} and not option.board:
             option.board = first_part
-        elif label in {"saida", "exit", "exit at", "alight", "alight at", "sai em", "sair em"} and not option.alight:
+        elif label in {"saida", "saia", "exit", "exit at", "alight", "alight at", "sai em", "sair em"} and not option.alight:
             option.alight = first_part
         elif re.match(r"(?:tempo em veiculo|in-vehicle time|travel time|tempo estimado)", label) and option.minutes is None:
             minutes = re.search(r"(\d+)\s*min", value)

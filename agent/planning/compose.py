@@ -50,7 +50,7 @@ _CONNECTION_WORD_RE = re.compile(
 )
 _NOT_CONFIRMED_RE = re.compile(
     r"\b(?:not confirmed|unconfirmed|could not be confirmed|confirmed only|only confirmed|only .{0,60} (?:is|are|was|were) confirmed|"
-    r"nao (?:foi |foram |ficou |ficaram |esta |estao )?confirmad\w*|por confirmar|sem confirmacao|"
+    r"nao (?:foi |foram |ficou |ficaram |esta |estao )?confirmad\w*|por confirmar|(?:sem|nao ha|nao existe) confirmacao|no confirmation|"
     r"not available|unavailable|nao (?:esta|estava|estao|estavam) disponive\w*|indisponive\w*|"
     r"no confirmed|sem (?:ligacao|conexao|percurso) confirmad\w*)\b"
 )
@@ -61,7 +61,9 @@ _INTERNAL_NOTE_RE = re.compile(
     r"\b(?:horario|plano) revisto\b|\bthe user\b|\bo utilizador\b|\ba utilizadora\b|"
     # The model narrating its search ("no night stop was found"); code states unmet requests itself.
     r"\bnao (?:foi|foram) encontrad\w*|\bnao encontr(?:ei|amos)\b|\b(?:was|were) not found\b|\bcould not find\b|"
-    r"\b(?:was|were) (?:not )?requested\b|\bnao (?:foi|foram) pedid\w*"
+    r"\b(?:was|were) (?:not )?requested\b|\bnao (?:foi|foram) pedid\w*|"
+    # The planning brief, in its English or Portuguese word ("no breve").
+    r"\b(?:the|this) brief\b|\b(?:no|do|pelo) breve\b"
 )
 # Live departures and service-hours notices only hold for leaving now.
 _LIVE_INFO_RES = (
@@ -1061,6 +1063,76 @@ _STOP_TYPE_NOTE_WORDS = {
 }
 
 
+def forget_dropped_stops(
+    draft: PlanDraft,
+    dropped: Sequence[str],
+    dropped_cards: Sequence[Any],
+    evidence: EvidenceBundle,
+    brief: Optional[PlanBrief],
+    language: str,
+) -> PlanDraft:
+    """Remove the dropped stops from the notes and the direct answer.
+
+    The model wrote them with every stop of its draft; once code drops a stop
+    (closed, over the requested count, without evidence), a sentence naming it
+    would describe a plan the user does not see.
+
+    Args:
+        draft: Plan whose blocks are already the kept stops.
+        dropped: Titles of the dropped stops.
+        dropped_cards: Evidence card of each dropped stop, or None.
+        evidence: Evidence cards available to the planner.
+        brief: Planning brief, for the area in a rewritten direct answer.
+        language: Output language.
+
+    Returns:
+        The same draft.
+    """
+    if not dropped or not draft.blocks:
+        return draft
+    dropped_tokens = {
+        token for name in dropped for token in normalize_text(name).split() if len(token) >= 5
+    }
+    kept_words = {
+        token for block in draft.blocks for token in normalize_text(strip_block_time(block.title)).split()
+    }
+    dropped_tokens -= kept_words
+
+    # A note may name the dropped stop only by its type ("o café escolhido
+    # fica fora de Alfama"); when no kept stop has that type, it is stale too.
+    kept_cards = [match_block_to_card(block.title, evidence) for block in draft.blocks]
+    lost_type_words = {
+        word
+        for dropped_card in dropped_cards
+        for kind, words in _STOP_TYPE_NOTE_WORDS.items()
+        if dropped_card is not None
+        and card_matches_kind(dropped_card, kind)
+        and not any(other is not None and card_matches_kind(other, kind) for other in kept_cards)
+        for word in words
+    }
+
+    def mentions_dropped(text: str) -> bool:
+        words = set(normalize_text(text).split())
+        return bool(dropped_tokens & words or lost_type_words & words)
+
+    draft.tips = [tip for tip in draft.tips if not mentions_dropped(tip)]
+    draft.limitations = [item for item in draft.limitations if not mentions_dropped(item)]
+    if mentions_dropped(draft.direct_answer):
+        # Rewritten like the planner's own direct answers: where, from when, which stops.
+        names = [strip_block_time(block.title) for block in draft.blocks]
+        listed = ", ".join(names[:-1]) + (" e " if language == "pt" else " and ") + names[-1] if len(names) > 1 else names[0]
+        first_start = _block_start_minutes(draft.blocks[0])
+        when = f"{first_start // 60:02d}:{first_start % 60:02d}" if first_start is not None else ""
+        area = brief.activity_areas[0] if brief and brief.activity_areas else ""
+        if language == "pt":
+            lead = ", ".join(part for part in (f"Em {area}" if area else "", f"a partir das {when}" if when else "") if part)
+            draft.direct_answer = f"{lead}, passas por {listed}." if lead else f"O plano passa por {listed}."
+        else:
+            lead = ", ".join(part for part in (f"In {area}" if area else "", f"from {when}" if when else "") if part)
+            draft.direct_answer = f"{lead}, you visit {listed}." if lead else f"The plan takes you to {listed}."
+    return draft
+
+
 def drop_closed_stops(draft: PlanDraft, evidence: EvidenceBundle, brief: Optional[PlanBrief], language: str) -> PlanDraft:
     """Remove stops scheduled when their card shows them closed, with a note.
 
@@ -1098,43 +1170,7 @@ def drop_closed_stops(draft: PlanDraft, evidence: EvidenceBundle, brief: Optiona
             draft.blocks = kept
         return draft
     draft.blocks = kept
-    # Notes and the direct answer were written with the dropped stop in them.
-    dropped_tokens = {
-        token for name in dropped for token in normalize_text(name).split() if len(token) >= 5
-    }
-
-    # A note may name the dropped stop only by its type ("o café escolhido
-    # fica fora de Alfama"); when no kept stop has that type, it is stale too.
-    kept_cards_now = [match_block_to_card(block.title, evidence) for block in kept]
-    lost_type_words = {
-        word
-        for dropped_card in dropped_cards
-        for kind, words in _STOP_TYPE_NOTE_WORDS.items()
-        if dropped_card is not None
-        and card_matches_kind(dropped_card, kind)
-        and not any(other is not None and card_matches_kind(other, kind) for other in kept_cards_now)
-        for word in words
-    }
-
-    def mentions_dropped(text: str) -> bool:
-        words = set(normalize_text(text).split())
-        return bool(dropped_tokens & words or lost_type_words & words)
-
-    draft.tips = [tip for tip in draft.tips if not mentions_dropped(tip)]
-    draft.limitations = [item for item in draft.limitations if not mentions_dropped(item)]
-    if mentions_dropped(draft.direct_answer):
-        # Rewritten like the planner's own direct answers: where, from when, which stops.
-        names = [strip_block_time(block.title) for block in kept]
-        listed = ", ".join(names[:-1]) + (" e " if language == "pt" else " and ") + names[-1] if len(names) > 1 else names[0]
-        first_start = _block_start_minutes(kept[0])
-        when = f"{first_start // 60:02d}:{first_start % 60:02d}" if first_start is not None else ""
-        area = brief.activity_areas[0] if brief and brief.activity_areas else ""
-        if language == "pt":
-            lead = ", ".join(part for part in (f"Em {area}" if area else "", f"a partir das {when}" if when else "") if part)
-            draft.direct_answer = f"{lead}, passas por {listed}." if lead else f"O plano passa por {listed}."
-        else:
-            lead = ", ".join(part for part in (f"In {area}" if area else "", f"from {when}" if when else "") if part)
-            draft.direct_answer = f"{lead}, you visit {listed}." if lead else f"The plan takes you to {listed}."
+    forget_dropped_stops(draft, dropped, dropped_cards, evidence, brief, language)
     # A closed stop the user asked for, or the only stop of a requested
     # type, is worth a note; any other stop is simply left out.
     named = [normalize_text(place) for place in (brief.named_places if brief else []) if place]
@@ -1367,7 +1403,8 @@ def drop_extra_counted_stops(draft: PlanDraft, evidence: EvidenceBundle, brief: 
 
     The review asks the model to keep "2 museums" at two; this is the backstop
     when the repaired plan still has more. The first stops of the type stay,
-    and a stop that also answers another requested type is kept.
+    and a stop that also answers another requested type, or that the user
+    named, is kept.
 
     Args:
         draft: Plan with curated blocks, in visiting order.
@@ -1384,6 +1421,8 @@ def drop_extra_counted_stops(draft: PlanDraft, evidence: EvidenceBundle, brief: 
     if not counted:
         return draft
     kinds = {component.kind for component in brief.components}
+    # A named place is asked for in its own right, whatever count its type got.
+    named_cards = {id(card) for card in (match_block_to_card(place, evidence) for place in brief.named_places) if card is not None}
     seen: Dict[str, int] = {}
     kept: List[PlanBlock] = []
     for block in draft.blocks:
@@ -1395,7 +1434,7 @@ def drop_extra_counted_stops(draft: PlanDraft, evidence: EvidenceBundle, brief: 
             component.kind for component in counted
             if card_matches_kind(card, component.kind) and seen.get(component.kind, 0) >= component.count
         ]
-        if over and not any(card_matches_kind(card, kind) for kind in kinds - set(over)):
+        if over and id(card) not in named_cards and not any(card_matches_kind(card, kind) for kind in kinds - set(over)):
             continue
         for component in counted:
             if card_matches_kind(card, component.kind):

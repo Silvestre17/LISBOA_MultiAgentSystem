@@ -15,8 +15,10 @@ from copy import deepcopy
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
+from tools.utils import without_weekday_feira
 from tools.visitlisboa_api import (
     MAX_USER_FACING_RESULTS,
+    _extract_requested_schedule_days,
     _extract_specific_event_lookup_phrase,
     _extract_specific_place_lookup_phrase,
     _load_places_json,
@@ -134,10 +136,17 @@ _RESEARCHER_CAFE_INTENT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Four-letter stems of words that many place names share (museum, national,
+# palace, Lisbon, Portuguese, connectors); they do not show that a translated
+# title still names the same place.
+_GENERIC_TITLE_STEMS = frozenset({
+    "muse", "nati", "naci", "pala", "lisb", "port", "the", "and", "dos", "das", "del", "for", "with", "com",
+})
+
 
 def _normalize_researcher_intent_text(value: str) -> str:
     """Return accent-insensitive lowercase text for intent regex matching."""
-    normalized = unicodedata.normalize("NFKD", str(value or ""))
+    normalized = unicodedata.normalize("NFKD", without_weekday_feira(value))
     normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
     return re.sub(r"\s+", " ", normalized).strip()
 
@@ -468,7 +477,16 @@ class ResearcherAgent(BaseAgent):
             return False
         lowered = value.lower()
         blocked = ("tradução", "translation", "não sei", "unknown", "official")
-        return not any(token in lowered for token in blocked)
+        if any(token in lowered for token in blocked):
+            return False
+        # A translation keeps a distinctive word of the name ("Decorative Arts" ->
+        # "Artes Decorativas"); one that shares none names another place
+        # ("Museum of Portuguese Decorative Arts" -> "Museu Nacional do Azulejo").
+        stems = [
+            {word[:4] for word in re.findall(r"[a-z]{3,}", _normalize_researcher_intent_text(text))} - _GENERIC_TITLE_STEMS
+            for text in (original, value)
+        ]
+        return not stems[0] or bool(stems[0] & stems[1])
 
     def _localize_place_titles_batch(self, titles: List[str]) -> Dict[str, str]:
         """Localize several English place titles to European Portuguese in one LLM call.
@@ -2743,7 +2761,7 @@ class ResearcherAgent(BaseAgent):
     @staticmethod
     def _is_direct_event_lookup_query(user_message: str) -> bool:
         """Detects event-discovery queries that are safer to answer directly from tools."""
-        query = (user_message or "").lower()
+        query = without_weekday_feira(user_message).lower()
         normalized_query = ResearcherAgent._normalize_event_preference_text(user_message)
         if any(term in query for term in ["history", "história", "historia"]):
             return False
@@ -2810,7 +2828,7 @@ class ResearcherAgent(BaseAgent):
     @staticmethod
     def _is_mixed_event_place_query(user_message: str) -> bool:
         """Detects mixed queries that ask for both places and events in the same turn."""
-        query = (user_message or "").lower()
+        query = without_weekday_feira(user_message).lower()
         normalized_query = ResearcherAgent._normalize_event_preference_text(user_message)
         event_terms = [
             "event", "events", "evento", "eventos", "concert", "concerto",
@@ -3062,7 +3080,7 @@ class ResearcherAgent(BaseAgent):
     @staticmethod
     def _normalize_event_preference_text(text: str) -> str:
         """Normalize user preference text for category-inclusion/exclusion checks."""
-        normalized = unicodedata.normalize("NFKD", text or "")
+        normalized = unicodedata.normalize("NFKD", without_weekday_feira(text))
         normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
         normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
         return re.sub(r"\s+", " ", normalized).strip()
@@ -3477,6 +3495,21 @@ class ResearcherAgent(BaseAgent):
             if cleaned_subject:
                 return cleaned_subject
 
+        # "O Museu Militar, em Santa Apolónia, abre à segunda?", "Is the MAAT open on Monday?"
+        subject_first_hours_match = re.search(
+            r"^(?:(?i:e|and)\s+)?(?:(?i:o|a|os|as|is|are|is\s+the|are\s+the|the)\s+)?"
+            r"(?!(?i:esse|essa|este|esta|that|this|it|o|a|os|as|the)\b)"
+            r"(?P<subject>[A-ZÀ-Ý][A-ZÀ-Ýa-zà-ÿ0-9 '&’\-/]{2,120}?)(?:\s*,[^,]{1,60},)?"
+            r"\s+(?i:abre|abrem|fecha|fecham|est[aá]\s+abert[oa]|funciona|open|opens|close|closes)\b",
+            query,
+        )
+        if subject_first_hours_match:
+            cleaned_subject = ResearcherAgent._clean_place_focus_subject(
+                subject_first_hours_match.group("subject").strip(" .?!,;:")
+            )
+            if cleaned_subject:
+                return cleaned_subject
+
         named_lookup_re = re.compile(
             r"\b(?:tell me about|what about|more about|details about|information about|where is|where's|find|show me|d[aá][- ]?me(?: mais)? detalhes? sobre(?: o| a| os| as)?|detalhes? sobre(?: o| a| os| as)?|sobre(?: o| a| os| as)?|fala[- ]?me(?: mais)? sobre(?: o| a| os| as)?|fala[- ]?me(?: mais)? (?:de|do|da|dos|das)|fale[- ]?me(?: mais)? (?:de|do|da|dos|das)|diz[- ]?me(?: mais)? sobre(?: o| a| os| as)?|diz[- ]?me (?:de|do|da|dos|das)|diz[- ]?me onde(?: e| é| fica)(?: o| a| os| as)?|onde(?: e| é| fica)(?: o| a| os| as)?|encontra(?:r)?|mostrar(?:-me)?)\b",
             re.IGNORECASE,
@@ -3552,7 +3585,7 @@ class ResearcherAgent(BaseAgent):
     @staticmethod
     def _is_direct_place_lookup_query(user_message: str) -> bool:
         """Detects straightforward place and service lookups that are safer to answer directly from tools."""
-        query = (user_message or "").lower()
+        query = without_weekday_feira(user_message).lower()
         history_keywords = ["history", "historical", "história", "historia", "culture", "cultura"]
         event_keywords = [
             "event", "events", "evento", "eventos", "concert", "concerto",
@@ -3646,6 +3679,12 @@ class ResearcherAgent(BaseAgent):
         if has_place_hint and has_directional_lookup:
             return True
         if has_field_specific_lookup:
+            return True
+        # Opening status of a named venue ("Is the MAAT open on Monday?", "O Museu Militar abre à segunda?").
+        if focus_query and re.search(
+            r"\b(?:open|opens|closed?|closes|abre|abrem|fecha|fecham|abert[oa]s?|fechad[oa]s?|funciona)\b",
+            query,
+        ):
             return True
         # Hours or tickets of a named venue without a category word ("opening hours of MAAT",
         # "When does the Oceanário open?", "A que horas abre o Pavilhão do Conhecimento?").
@@ -5489,7 +5528,8 @@ class ResearcherAgent(BaseAgent):
             and re.search(
                 r"\b(?:bilhetes?|tickets?|entradas?|pre[cç]os?|prices?|"
                 r"hor[aá]rios?|opening\s+hours?|hours?|website|site|telefone|phone|email|e-mail|"
-                r"a\s+que\s+horas?|quando\s+(?:abre|fecha)m?|(?:when|what\s+time)\s+(?:does|do|is))\b",
+                r"a\s+que\s+horas?|quando\s+(?:abre|fecha)m?|(?:when|what\s+time)\s+(?:does|do|is)|"
+                r"abre|abrem|fecha|fecham|abert[oa]s?|fechad[oa]s?|open|opens|closed?)\b",
                 normalized_lookup_text,
                 flags=re.IGNORECASE,
             )
@@ -5565,7 +5605,8 @@ class ResearcherAgent(BaseAgent):
 
         if places_tool and place_focus_query and specific_lookup and not is_broad_attractions and not service_types:
             exact_args = {
-                "query": place_focus_query,
+                # "abre à segunda?": the day travels with the name, so the card shows Monday's hours.
+                "query": " ".join([place_focus_query, *_extract_requested_schedule_days(user_message)]),
                 "max_results": 5,
                 "offset": 0,
                 "language": language,
@@ -6736,7 +6777,21 @@ class ResearcherAgent(BaseAgent):
             if is_pt
             else f"✅ **Direct answer:** **{name}** is at **{address.group('value').strip()}**"
         )
-        if asks_hours:
+        # "Abre à segunda?" / "Is X open on Monday?" with that one day's hours: answer yes or no first.
+        asks_open_status = not re.search(r"\b(?:a\s+que\s+horas|quando|hor[aá]rios?|when|what\s+time|hours)\b", user_message or "", re.IGNORECASE)
+        day_hours = re.fullmatch(r"(?P<day>[A-Za-zÀ-ÿ\-]+):\s*(?P<value>[^;,\n]+?)\s*", hours.group("value")) if hours else None
+        if asks_hours and asks_open_status and day_hours:
+            day = day_hours.group("day")
+            value = day_hours.group("value")
+            closed = bool(re.fullmatch(r"(?i)fechad[oa]|encerrad[oa]|closed", value))
+            if is_pt:
+                day_phrase = f"{'ao' if day.lower() in {'sábado', 'domingo'} else 'à'} {day.lower()}"
+                answer = f"Não, **{name}** fecha {day_phrase}" if closed else f"Sim, **{name}** abre {day_phrase} ({value})"
+                sentence = f"✅ **Resposta direta:** {answer}. Fica em **{address.group('value').strip()}**."
+            else:
+                answer = f"No, **{name}** is closed on {day}" if closed else f"Yes, **{name}** is open on {day} ({value})"
+                sentence = f"✅ **Direct answer:** {answer}. It is at **{address.group('value').strip()}**."
+        elif asks_hours:
             if hours:
                 sentence += (f"; horário: {hours.group('value').strip()}" if is_pt else f"; opening hours: {hours.group('value').strip()}")
             else:
@@ -8400,7 +8455,7 @@ class ResearcherAgent(BaseAgent):
     @staticmethod
     def _extract_service_types(user_message: str) -> List[str]:
         """Extracts one or more practical service types from a service query."""
-        normalized_query = unicodedata.normalize("NFKD", user_message or "")
+        normalized_query = unicodedata.normalize("NFKD", without_weekday_feira(user_message))
         normalized_query = normalized_query.encode("ascii", "ignore").decode("ascii").lower()
         parking_context = bool(re.search(
             r"\b(?:parking|car\s+parks?|park\s+my\s+car|estacionamento|estacionar|parques?\s+de\s+estacionamento)\b",

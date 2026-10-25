@@ -23,6 +23,7 @@ from agent.planning.brief import (
     parse_plan_brief,
     roll_past_window_to_tomorrow,
 )
+from agent.prompts.follow_up import FOLLOW_UP_KINDS, build_follow_up_messages
 from agent.prompts.supervisor import get_supervisor_prompt
 from agent.utils.geographic_scope import (
     build_geographic_out_of_scope_response,
@@ -107,10 +108,39 @@ class SupervisorAgent(BaseAgent):
 
         return roll_past_window_to_tomorrow(fill_stated_day(brief, user_message), lisbon_now())
 
+    def interpret_follow_up(self, user_message: str, language: str, conversation: str) -> Dict[str, str]:
+        """Classify a conversational turn and rewrite it as a self-contained request.
+
+        Args:
+            user_message: The latest user message.
+            language: Answer language of the turn (``pt`` or ``en``).
+            conversation: Condensed earlier turns and the latest itinerary.
+
+        Returns:
+            ``kind``, ``request`` and ``answer``, or an empty dict when the model
+            answer cannot be read; the caller then keeps the message as written.
+        """
+        messages = build_follow_up_messages(user_message, language, conversation)
+        try:
+            response = self._safe_llm_invoke(self.llm, messages, retries=1)
+        except Exception as exc:
+            logger.warning("Follow-up interpretation failed: %s", exc)
+            return {}
+        decision = parse_json_response(str(getattr(response, "content", "") or ""))
+        if not isinstance(decision, dict) or decision.get("kind") not in FOLLOW_UP_KINDS:
+            return {}
+        return {
+            "kind": str(decision["kind"]),
+            "request": re.sub(r"\s+", " ", str(decision.get("request") or "")).strip() or user_message,
+            "answer": re.sub(r"\s+", " ", str(decision.get("answer") or "")).strip(),
+        }
+
     @staticmethod
     def _normalize_query(user_message: str) -> str:
         """Normalizes user text for lightweight routing heuristics."""
-        normalized = unicodedata.normalize("NFKD", str(user_message or ""))
+        from tools.utils import without_weekday_feira
+
+        normalized = unicodedata.normalize("NFKD", without_weekday_feira(user_message))
         normalized = "".join(
             char for char in normalized if not unicodedata.combining(char)
         )
@@ -402,7 +432,7 @@ class SupervisorAgent(BaseAgent):
             re.search(r"\b\d{1,4}e\b", normalized, flags=re.IGNORECASE)
             or re.search(
                 r"\b(?:linha|route|line|rota|tram|el[eé]trico|autocarro|bus|"
-                r"o|a|do|da|no|na|the)\s+\d{2,4}[a-z]?\b",
+                r"o|a|do|da|no|na|the|proxim[oa]|next)\s+\d{2,4}[a-z]?\b",
                 normalized,
                 flags=re.IGNORECASE,
             )
@@ -1444,7 +1474,7 @@ class SupervisorAgent(BaseAgent):
         if transport_hit and re.search(
             r"\b(?:(?:when|quando|a\s+que\s+horas).{0,80}\b(?:next|pr[oó]xim[ao]|bus|autocarro|linha|line)|"
             r"(?:next|pr[oó]xim[ao]|eta|arrival|chegada).{0,80}\b(?:bus|autocarro|linha|line)|"
-            r"(?:bus|autocarro|linha|line)\s+\d{1,4}[a-z]?)\b",
+            r"(?:bus|autocarro|linha|line|next|pr[oó]xim[ao])\s+\d{1,4}[a-z]?)\b",
             message_lower,
             flags=re.IGNORECASE,
         ):

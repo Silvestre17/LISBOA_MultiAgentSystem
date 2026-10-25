@@ -171,6 +171,34 @@ _QA_MSG_PREVIEW_LEN = 200
 _MAX_CONVERSATION_HISTORY_MESSAGES = 60
 # Maximum time to wait for all parallel workers before collecting partial results.
 _WORKER_BATCH_TIMEOUT_S = 120
+# Earlier messages (three exchanges) the follow-up interpreter reads.
+_FOLLOW_UP_DIGEST_MESSAGES = 6
+# Card fields that do not help resolve a reference to an earlier answer.
+_CONTEXT_NOISE_FIELD_RE = re.compile(
+    r"\*\*(?:Telefone|Phone|Email|Website|Avalia[cç][aã]o|Rating|Bilhetes|Tickets|Mais detalhes|"
+    r"More details|Lisboa Card|Pre[cç]o|Price|Caracter[ií]sticas|Features|Descri[cç][aã]o|Description)\b[^*]*:\*\*"
+)
+# A turn that discards the conversation: "esquece isso", "forget the plan",
+# "nova pergunta". "Esquece o museu" or "drop the museum" changes the plan instead.
+_CONTEXT_RESET_CUE = (
+    r"(?:forget|ignore|discard|drop|reset|clear)\s+"
+    r"(?:(?:about\s+)?(?:that|this|it|everything|all\s+(?:that|of\s+(?:that|this)))\s*(?=[.,;:!?-]|$)|"
+    r"(?:the|my|this|that|our)\s+(?:previous\s+|last\s+|current\s+)?(?:plan|itinerary|context|conversation|chat)\b|"
+    r"(?:the\s+)?(?:everything\s+)?(?:previous|above)\b)"
+    r"|(?:start\s+over|begin\s+again|come[cç]ar\s+(?:de\s+novo|do\s+zero)|recome[cç]ar(?:\s+do\s+zero)?)\b"
+    r"|(?:new|fresh)\s+(?:question|topic|request)\b"
+    r"|(?:esquece|ignora|descarta|limpa|reinicia)\s+"
+    r"(?:(?:isso|isto|tudo(?:\s+isso)?|o\s+que\s+(?:eu\s+)?(?:disse|pedi))\s*(?=[.,;:!?-]|$)|"
+    r"(?:esse|essa|este|esta|o|a)\s+(?:plano|roteiro|itiner[aá]rio|contexto|conversa)(?:\s+anterior)?\b)"
+    r"|(?:nova|novo)\s+(?:pergunta|pedido|tema)\b"
+)
+# A reply that opens with a question word asks something new; it does not
+# answer a pending "which place did you mean?" (matched on folded text).
+_FRESH_QUESTION_START_RE = re.compile(
+    r"^(?:que|qual|quais|como|quando|onde|porque|por\s+que|"
+    r"mostra|diz-me|lista|procura|recomenda|conta-me|fala-me|"
+    r"what|which|how|when|where|why|show|tell|list|find|give|recommend)\b"
+)
 
 # ==========================================================================
 # Tool Configuration
@@ -1591,43 +1619,18 @@ class MultiAgentAssistant:
         folded = cls._fold_context_text(message)
         if not folded:
             return False
-        return bool(
-            re.search(
-                r"\b(?:forget|ignore|discard|drop|reset|clear)\s+"
-                r"(?:that|this|the)?\s*(?:plan|itinerary|context|previous|above)?\b|"
-                r"\b(?:start\s+over|begin\s+again|come[cç]ar\s+(?:de\s+novo|do\s+zero)|"
-                r"recome[cç]ar(?:\s+do\s+zero)?)\b|"
-                r"\b(?:new|fresh)\s+(?:question|topic|request)\b|"
-                r"\b(?:esquece|ignora|descarta|limpa|reinicia)\s+"
-                r"(?:isso|isto|esse|essa|o\s+plano|o\s+contexto|a\s+conversa\s+anterior)?\b|"
-                r"\b(?:nova|novo)\s+(?:pergunta|pedido|tema)\b",
-                folded,
-            )
-        )
+        return bool(re.search(rf"\b(?:{_CONTEXT_RESET_CUE})", folded))
 
     @classmethod
     def _strip_context_reset_prefix(cls, message: str) -> str:
         """Remove an explicit reset preface before routing the fresh request."""
         text = re.sub(r"\s+", " ", str(message or "")).strip()
-        if not text:
-            return ""
-        patterns = (
-            r"^\s*(?:forget|ignore|discard|drop|reset|clear)\s+"
-            r"(?:that|this|the)?\s*(?:plan|itinerary|context|previous|above)?\s*[\.;:,\-]*\s*(?P<rest>.+)$",
-            r"^\s*(?:start\s+over|begin\s+again|recome[cç]ar(?:\s+do\s+zero)?|"
-            r"come[cç]ar\s+(?:de\s+novo|do\s+zero)|new\s+question|fresh\s+question|"
-            r"new\s+topic|fresh\s+topic)\s*[\.;:,\-]*\s*(?P<rest>.+)$",
-            r"^\s*(?:esquece|ignora|descarta|limpa|reinicia)\s+"
-            r"(?:isso|isto|esse|essa|o\s+plano|o\s+contexto|a\s+conversa\s+anterior)?\s*[\.;:,\-]*\s*(?P<rest>.+)$",
-            r"^\s*(?:nova|novo)\s+(?:pergunta|pedido|tema)\s*[\.;:,\-]*\s*(?P<rest>.+)$",
+        match = re.match(
+            rf"\s*(?:{_CONTEXT_RESET_CUE})\s*[.;:,!\-]*\s*(?:(?:e|and)\s+)?(?P<rest>.+)$",
+            text,
+            flags=re.IGNORECASE,
         )
-        for pattern in patterns:
-            match = re.search(pattern, text, flags=re.IGNORECASE)
-            if match:
-                rest = (match.group("rest") or "").strip()
-                if rest:
-                    return rest
-        return text
+        return match.group("rest").strip() if match else text
 
     @classmethod
     def _short_english_follow_up_uses_previous_language(cls, message: str) -> bool:
@@ -3360,12 +3363,7 @@ class MultiAgentAssistant:
                     cleaned_reply,
                     flags=re.IGNORECASE,
                 ).strip(" .,:;?!")
-            if re.match(
-                r"^(?:que|qual|quais|como|quando|onde|porque|por\s+que|"
-                r"mostra|diz-me|lista|procura|recomenda|conta-me|fala-me|"
-                r"what|which|how|when|where|why|show|tell|list|find|give|recommend)\b",
-                self._fold_context_text(cleaned_reply),
-            ):
+            if _FRESH_QUESTION_START_RE.match(self._fold_context_text(cleaned_reply)):
                 anchors["pending_location_clarification"] = {}
                 return {
                     "message": message,
@@ -5070,6 +5068,46 @@ class MultiAgentAssistant:
             )
         )
 
+    @staticmethod
+    def _condense_answer_for_context(text: str, limit: int) -> str:
+        """Keep the names, times, addresses, and legs of an answer, without links or contacts."""
+        kept: List[str] = []
+        for line in str(text or "").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped == "---" or stripped.startswith("📌"):
+                continue
+            if _CONTEXT_NOISE_FIELD_RE.search(stripped):
+                continue
+            stripped = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", stripped).replace("**", "")
+            kept.append(("  " if line.startswith(("    ", "\t")) else "") + stripped)
+        return "\n".join(kept)[:limit]
+
+    def _conversation_digest(self) -> str:
+        """Return the recent turns and the latest itinerary for follow-up interpretation."""
+        earlier = list(self.state.get("messages") or [])[:-1][-_FOLLOW_UP_DIGEST_MESSAGES:]
+        parts: List[str] = []
+        for previous in earlier:
+            content = str(getattr(previous, "content", "") or "")
+            if isinstance(previous, HumanMessage):
+                parts.append(f"User: {content.strip()[:400]}")
+            elif isinstance(previous, AIMessage):
+                parts.append(f"Assistant:\n{self._condense_answer_for_context(content, 1800)}")
+        anchors = self._get_conversation_anchors()
+        plan_text = str(anchors.get("last_plan_text") or "")
+        shown = {str(getattr(previous, "content", "") or "") for previous in earlier}
+        if plan_text and not any(content.startswith(plan_text[:200]) for content in shown):
+            parts.append(f"Latest itinerary (earlier in the conversation):\n{self._condense_answer_for_context(plan_text, 1800)}")
+        if plan_text and anchors.get("last_plan_timing"):
+            parts.append(f"Latest itinerary timing: {anchors['last_plan_timing']}")
+        return "\n\n".join(parts)
+
+    def _interpret_turn(self, message: str, language: str) -> Dict[str, str]:
+        """Classify the turn against the conversation; empty for a first turn."""
+        earlier = list(self.state.get("messages") or [])[:-1]
+        if not any(isinstance(previous, AIMessage) for previous in earlier):
+            return {}
+        return self.supervisor.interpret_follow_up(message, language, self._conversation_digest())
+
     def _resolve_contextual_follow_up(self, message: str, language: str) -> Dict[str, Any]:
         """Resolve compact follow-ups such as 'there' or plan revision requests."""
         # First, resolve anaphoric venue references like "the restaurant you
@@ -5077,9 +5115,38 @@ class MultiAgentAssistant:
         # route to the correct worker(s) instead of issuing a fresh search.
         message = self._resolve_venue_anaphor(message)
         anchors = self._get_conversation_anchors()
-        normalized = re.sub(r"\s+", " ", (message or "").lower()).strip()
-        if not normalized:
+        if not message.strip():
             return {"message": message}
+
+        # The interpreter reads the turn against the conversation and rewrites a
+        # follow-up as a complete request; the rules below then see the same kind
+        # of message as a first turn. A reply to a pending clarification keeps its
+        # own resolver, which maps option letters and partial names; a question
+        # asks something new and is interpreted.
+        answers_pending_clarification = bool(anchors.get("pending_location_clarification")) and not (
+            _FRESH_QUESTION_START_RE.match(self._fold_context_text(message))
+        )
+        if not answers_pending_clarification:
+            anchors["pending_location_clarification"] = {}
+        interpretation = {} if answers_pending_clarification else self._interpret_turn(message, language)
+        turn_kind = interpretation.get("kind", "")
+        if turn_kind == "new":
+            # A standalone request is routed like a first turn; the follow-up
+            # rules below would only bend it towards the previous answer.
+            return {"message": message}
+        has_previous_plan = bool(anchors.get("last_plan_text") or anchors.get("last_plan_summary"))
+        if turn_kind == "recall" and interpretation.get("answer"):
+            label = "Resposta direta" if language == "pt" else "Direct answer"
+            return {"direct_response": f"✅ **{label}:** {interpretation['answer']}"}
+        if turn_kind == "plan_change" and has_previous_plan:
+            return self._plan_revision_resolution(message, language, interpretation["request"])
+        if turn_kind == "more_results":
+            pagination = self._resolve_research_pagination_follow_up(message, language)
+            if pagination:
+                return pagination
+        if turn_kind in {"follow_up", "plan_change", "more_results"}:
+            message = interpretation["request"]
+        normalized = re.sub(r"\s+", " ", message.lower()).strip()
 
         previous_location = str(
             anchors.get("last_location_anchor") or anchors.get("last_weather_location") or ""
@@ -5698,241 +5765,263 @@ class MultiAgentAssistant:
                 normalized,
             )
         )
+        # Keyword cues decide only when the interpreter gave no answer.
         revises_previous_plan = bool(
-            previous_plan_context
+            not turn_kind
+            and previous_plan_context
             and (explicit_plan_revision_cue or compact_plan_revision_cue)
         )
         if revises_previous_plan:
-            preferences = ", ".join(anchors.get("user_preferences") or [])
-            exclusions = ", ".join(anchors.get("excluded_areas") or [])
-            destinations = ", ".join(str(item) for item in (anchors.get("last_itinerary_destinations") or [])[:8])
-            folded_area_context = self._fold_context_text(
-                " ".join(
-                    [
-                        destinations,
-                        str(anchors.get("last_plan_summary") or ""),
-                        str(anchors.get("last_plan_text") or ""),
-                    ]
-                )
-            )
-            previous_zone = str(anchors.get("last_plan_area_zone") or "").strip()
-            if not previous_zone and "belem" in folded_area_context:
-                previous_zone = "belem"
-            previous_area = self._planner_zone_label(previous_zone, language=language) if previous_zone else ""
-            rain_or_indoor_revision = bool(
-                re.search(r"\b(?:rain|chuva|chover|interiores?|indoor|covered|cobert[oa]s?)\b", normalized)
-            )
-            preserve_previous_meal = bool(
-                re.search(
-                    r"\b(?:mant[eé]m|mantendo|manter|preserva|preservar|keep|keeping|same)\b"
-                    r".{0,80}\b(?:restaurante|restaurant|almo[cç]o|lunch|jantar|dinner|refei[cç][aã]o|meal)\b",
-                    normalized,
-                    flags=re.IGNORECASE,
-                )
-            )
-            previous_meal_anchors = self._extract_meal_anchors_from_plan("restaurante") if preserve_previous_meal else []
-            previous_meal_context = ""
-            if previous_meal_anchors:
-                meal_parts = []
-                for anchor in previous_meal_anchors[:3]:
-                    anchor_name = str(anchor.get("name") or "").strip()
-                    anchor_address = str(anchor.get("address") or "").strip()
-                    if anchor_name:
-                        meal_parts.append(anchor_name + (f" ({anchor_address})" if anchor_address else ""))
-                previous_meal_context = "; ".join(meal_parts)
-            previous_meal_unconfirmed = bool(
-                preserve_previous_meal
-                and re.search(
-                    r"\b(?:nenhum restaurante especifico ficou confirmado|no specific restaurant was confirmed)\b",
-                    self._fold_context_text(str(anchors.get("last_plan_text") or "")),
-                    flags=re.IGNORECASE,
-                )
-            )
-            if previous_meal_unconfirmed and rain_or_indoor_revision:
-                return {
-                    "direct_response": self._build_unconfirmed_meal_revision_response(
-                        language=language,
-                        previous_area=previous_area,
-                        destinations=list(anchors.get("last_itinerary_destinations") or []),
-                    )
-                }
-            if language == "pt":
-                locality_constraint = (
-                    f"Restrição de zona: mantém apenas pontos na zona **{previous_area}**; "
-                    "ignora resultados cuja morada, nome ou descrição indiquem outra zona ou concelho. "
-                    "Se não houver alternativas interiores confirmadas nessa zona, diz claramente que não há dados suficientes "
-                    "em vez de trocar para outra zona."
-                    if previous_area
-                    else "Restrição de zona: preserva a zona inferida pelas paragens anteriores; não mudes para outra zona salvo pedido explícito."
-                )
-                meal_instruction = (
-                    "Mantém a refeição anterior; se ela estava apenas a confirmar e sem restaurante específico, "
-                    "diz isso claramente e não a substituas por outro restaurante novo. "
-                    if preserve_previous_meal
-                    else ""
-                )
-                if rain_or_indoor_revision:
-                    revision_goal = (
-                        "Objetivo: adaptar o roteiro anterior para chuva, substituindo paragens exteriores "
-                        "por opções mais interiores ou cobertas, como museus, monumentos visitáveis por dentro, "
-                        "centros culturais e cafés/pastelarias cobertas próximos das paragens anteriores. "
-                        "A resposta direta deve dizer explicitamente que o roteiro foi adaptado para chuva "
-                        "e destacar a principal alteração feita. "
-                        "Mantém a mesma zona do roteiro anterior; não uses alternativas noutros bairros/concelhos "
-                        "como se fossem substituições locais. Se não houver dados suficientes na mesma zona, diz isso claramente. "
-                        f"{meal_instruction}{locality_constraint}"
-                    )
-                else:
-                    revision_goal = (
-                        "Objetivo: rever o roteiro anterior mantendo apenas alterações pedidas pelo utilizador. "
-                        f"{meal_instruction}"
-                    ).strip()
-                meal_context_line = (
-                    f"Refeição anterior a preservar: {previous_meal_context or 'não extraída explicitamente'}.\n"
-                    f"Estado da refeição anterior: {'sem restaurante específico confirmado; preservar como limitação, não substituir' if previous_meal_unconfirmed else 'usar apenas se estiver explicitamente confirmada no contexto'}.\n"
-                    if preserve_previous_meal
-                    else ""
-                )
-                # Only emit the area line when a concrete zone is known. An empty
-                # placeholder ("inferir pelas paragens anteriores") used to leak into
-                # the plan as a fake area label ("na zona anterior").
-                zona_line = f"Zona anterior: {previous_area}.\n" if previous_area else ""
-                preservation_instruction = (
-                    "Preserva as paragens já fundamentadas do roteiro anterior que continuam compatíveis "
-                    "(reutiliza os locais já confirmados na evidência, com a mesma morada). Aplica a alteração "
-                    "pedida pelo utilizador: se pedir para adicionar uma componente (por exemplo um café ou "
-                    "pastelaria), inclui-a como uma paragem distinta e fundamentada, sem a confundir com a "
-                    "refeição já existente; se pedir para trocar uma componente, substitui apenas essa. Não "
-                    "publiques paragens genéricas nem inventes locais; se uma componente pedida não tiver "
-                    "evidência, indica a limitação em vez de a omitir em silêncio ou criar uma paragem fictícia.\n"
-                )
-                # Continuity guidance is routed through conversation_context, NOT
-                # injected into the user message. Stuffing scaffolding prose into
-                # the message corrupts the planner's request heuristics (area, meal
-                # placeholders), which used to leak fragments such as "em utilizador".
-                continuity_context = (
-                    f"Contexto do roteiro anterior: {str(anchors.get('last_plan_summary') or '')[:900]}.\n"
-                    f"Paragens anteriores: {destinations or 'não extraídas explicitamente'}.\n"
-                    f"{zona_line}"
-                    f"{meal_context_line}"
-                    f"{revision_goal}\n"
-                    f"{preservation_instruction}"
-                    "Não trates títulos de secção ou texto de resposta direta como paragens do roteiro.\n"
-                    f"Preferências guardadas: {preferences or 'nenhuma preferência explícita'}.\n"
-                    f"Exclusões guardadas: {exclusions or 'nenhuma exclusão explícita'}."
-                )
-            else:
-                locality_constraint = (
-                    f"Area constraint: keep only places in **{previous_area}**; ignore results whose address, name, "
-                    "or description indicate another area or municipality. If there are not enough confirmed indoor "
-                    "alternatives in that area, state that limitation instead of switching area."
-                    if previous_area
-                    else "Area constraint: preserve the area inferred from the previous stops; do not switch area unless explicitly requested."
-                )
-                meal_instruction = (
-                    "Keep the previous meal stop; if it was only an unconfirmed meal placeholder, say that clearly "
-                    "and do not replace it with a new restaurant. "
-                    if preserve_previous_meal
-                    else ""
-                )
-                if rain_or_indoor_revision:
-                    revision_goal = (
-                        "Goal: adapt the previous itinerary for rain by replacing outdoor stops with more indoor "
-                        "or covered options, such as museums, indoor monuments, cultural centres, and covered cafés "
-                        "near the previous stops. The direct answer must explicitly say that the itinerary was "
-                        "adapted for rain and highlight the main change. "
-                        "Keep the same area as the previous itinerary; do not use alternatives "
-                        "in other neighbourhoods/municipalities as local replacements. If there is not enough same-area "
-                        f"evidence, state that clearly. {meal_instruction}{locality_constraint}"
-                    )
-                else:
-                    revision_goal = (
-                        "Goal: revise the previous itinerary while preserving only the changes requested by the user. "
-                        f"{meal_instruction}"
-                    ).strip()
-                meal_context_line = (
-                    f"Previous meal stop to preserve: {previous_meal_context or 'not explicitly extracted'}.\n"
-                    f"Previous meal status: {'no specific restaurant confirmed; preserve as a limitation, do not replace' if previous_meal_unconfirmed else 'use only if explicitly confirmed in context'}.\n"
-                    if preserve_previous_meal
-                    else ""
-                )
-                # Only emit the area line when a concrete zone is known. An empty
-                # placeholder ("infer from the previous stops") used to leak into the
-                # plan as a fake area label ("in the previous area").
-                zona_line = f"Previous area: {previous_area}.\n" if previous_area else ""
-                preservation_instruction = (
-                    "Preserve the previously grounded stops that are still compatible "
-                    "(reuse the already-confirmed places in the evidence, with the same address). Apply the "
-                    "user's requested change: if they ask to add a component (for example a cafe or pastry "
-                    "shop), include it as a distinct grounded stop, without merging it with the existing meal; "
-                    "if they ask to swap a component, replace only that one. Do not publish generic stops or "
-                    "invent places; if a requested component has no evidence, state the limitation instead of "
-                    "silently omitting it or creating a fake stop.\n"
-                )
-                # Continuity guidance is routed through conversation_context, NOT
-                # injected into the user message. Stuffing scaffolding prose into
-                # the message corrupts the planner's request heuristics (area, meal
-                # placeholders), which used to leak fragments such as "in the user".
-                continuity_context = (
-                    f"Previous itinerary context: {str(anchors.get('last_plan_summary') or '')[:900]}.\n"
-                    f"Previous stops: {destinations or 'not explicitly extracted'}.\n"
-                    f"{zona_line}"
-                    f"{meal_context_line}"
-                    f"{revision_goal}\n"
-                    f"{preservation_instruction}"
-                    "Do not treat section headings or direct-answer text as itinerary stops.\n"
-                    f"Stored preferences: {preferences or 'none explicitly stored'}.\n"
-                    f"Stored exclusions: {exclusions or 'none explicitly stored'}."
-                )
-            last_agents = {str(agent) for agent in anchors.get("last_response_agents") or []}
-            needs_transport_revision = bool(
-                "transport" in last_agents
-                or re.search(
-                    r"\b(?:transportes?|metro|autocarros?|comboios?|train|trains|bus|buses|"
-                    r"tram|trams|desloca[cç][aã]o|desloca[cç][oõ]es|pouca\s+caminhada|"
-                    r"pouco\s+andar|low\s+walking|minimal\s+walking|hotel|voltar|return)\b",
-                    normalized,
-                )
-            )
-            # Only fetch weather when the revision is actually weather-driven: a
-            # rain/indoor adaptation, an explicit weather mention, or a previous
-            # turn that already used weather. Otherwise injecting weather adds a
-            # stray forecast section and collapses the source footer to IPMA-only.
-            weather_requested = bool(
-                re.search(
-                    r"\b(?:tempo|clima|chuva|chover|rain|raining|weather|sol|sun|sunny|"
-                    r"temperatura|temperature|frio|cold|calor|heat|hot|vento|wind)\b",
-                    normalized,
-                )
-            )
-            needs_weather_revision = bool(
-                rain_or_indoor_revision or weather_requested or "weather" in last_agents
-            )
-            revision_agents: List[str] = []
-            if needs_weather_revision:
-                revision_agents.append("weather")
-            if needs_transport_revision:
-                revision_agents.append("transport")
-            revision_agents.extend(["researcher", "planner"])
-
-            # Carry the previously grounded stops as reusable planner evidence so a
-            # revision can preserve them. Without this the planner only receives bare
-            # stop names, cannot ground them, and degrades to generic placeholders.
-            prior_plan_cards, _prior_source_line = self._extract_place_cards_from_answer(
-                str(anchors.get("last_plan_text") or "")
-            )
-            planner_prior_evidence = self._format_prior_plan_evidence(prior_plan_cards, language)
-            # Keep the user message clean; carry continuity via conversation_context.
-            resolution: Dict[str, Any] = {
-                "agents": revision_agents,
-                "routing_reasoning": "Planning follow-up asks to revise the previous itinerary while preserving grounded stops.",
-                "conversation_context": continuity_context.strip(),
-            }
-            if planner_prior_evidence:
-                resolution["planner_prior_evidence"] = planner_prior_evidence
-            return resolution
+            return self._plan_revision_resolution(message, language)
 
         return {"message": message}
+
+    def _plan_revision_resolution(self, message: str, language: str, request: str = "") -> Dict[str, Any]:
+        """Route a turn that changes the previous itinerary to the planning workers.
+
+        Args:
+            message: The user's message as written.
+            language: Output language (``pt`` or ``en``).
+            request: The message rewritten as a complete itinerary request, when
+                the follow-up interpreter produced one.
+
+        Returns:
+            Routing for the revision, with the earlier plan as conversation
+            context and its grounded stops as reusable planner evidence.
+        """
+        anchors = self._get_conversation_anchors()
+        normalized = re.sub(r"\s+", " ", f"{message} {request}".lower()).strip()
+        preferences = ", ".join(anchors.get("user_preferences") or [])
+        exclusions = ", ".join(anchors.get("excluded_areas") or [])
+        destinations = ", ".join(str(item) for item in (anchors.get("last_itinerary_destinations") or [])[:8])
+        folded_area_context = self._fold_context_text(
+            " ".join(
+                [
+                    destinations,
+                    str(anchors.get("last_plan_summary") or ""),
+                    str(anchors.get("last_plan_text") or ""),
+                ]
+            )
+        )
+        previous_zone = str(anchors.get("last_plan_area_zone") or "").strip()
+        if not previous_zone and "belem" in folded_area_context:
+            previous_zone = "belem"
+        previous_area = self._planner_zone_label(previous_zone, language=language) if previous_zone else ""
+        rain_or_indoor_revision = bool(
+            re.search(r"\b(?:rain|chuva|chover|interiores?|indoor|covered|cobert[oa]s?)\b", normalized)
+        )
+        preserve_previous_meal = bool(
+            re.search(
+                r"\b(?:mant[eé]m|mantendo|manter|preserva|preservar|keep|keeping|same)\b"
+                r".{0,80}\b(?:restaurante|restaurant|almo[cç]o|lunch|jantar|dinner|refei[cç][aã]o|meal)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+        previous_meal_anchors = self._extract_meal_anchors_from_plan("restaurante") if preserve_previous_meal else []
+        previous_meal_context = ""
+        if previous_meal_anchors:
+            meal_parts = []
+            for anchor in previous_meal_anchors[:3]:
+                anchor_name = str(anchor.get("name") or "").strip()
+                anchor_address = str(anchor.get("address") or "").strip()
+                if anchor_name:
+                    meal_parts.append(anchor_name + (f" ({anchor_address})" if anchor_address else ""))
+            previous_meal_context = "; ".join(meal_parts)
+        previous_meal_unconfirmed = bool(
+            preserve_previous_meal
+            and re.search(
+                r"\b(?:nenhum restaurante especifico ficou confirmado|no specific restaurant was confirmed)\b",
+                self._fold_context_text(str(anchors.get("last_plan_text") or "")),
+                flags=re.IGNORECASE,
+            )
+        )
+        if previous_meal_unconfirmed and rain_or_indoor_revision:
+            return {
+                "direct_response": self._build_unconfirmed_meal_revision_response(
+                    language=language,
+                    previous_area=previous_area,
+                    destinations=list(anchors.get("last_itinerary_destinations") or []),
+                )
+            }
+        if language == "pt":
+            locality_constraint = (
+                f"Restrição de zona: mantém apenas pontos na zona **{previous_area}**; "
+                "ignora resultados cuja morada, nome ou descrição indiquem outra zona ou concelho. "
+                "Se não houver alternativas interiores confirmadas nessa zona, diz claramente que não há dados suficientes "
+                "em vez de trocar para outra zona."
+                if previous_area
+                else "Restrição de zona: preserva a zona inferida pelas paragens anteriores; não mudes para outra zona salvo pedido explícito."
+            )
+            meal_instruction = (
+                "Mantém a refeição anterior; se ela estava apenas a confirmar e sem restaurante específico, "
+                "diz isso claramente e não a substituas por outro restaurante novo. "
+                if preserve_previous_meal
+                else ""
+            )
+            if rain_or_indoor_revision:
+                revision_goal = (
+                    "Objetivo: adaptar o roteiro anterior para chuva, substituindo paragens exteriores "
+                    "por opções mais interiores ou cobertas, como museus, monumentos visitáveis por dentro, "
+                    "centros culturais e cafés/pastelarias cobertas próximos das paragens anteriores. "
+                    "A resposta direta deve dizer explicitamente que o roteiro foi adaptado para chuva "
+                    "e destacar a principal alteração feita. "
+                    "Mantém a mesma zona do roteiro anterior; não uses alternativas noutros bairros/concelhos "
+                    "como se fossem substituições locais. Se não houver dados suficientes na mesma zona, diz isso claramente. "
+                    f"{meal_instruction}{locality_constraint}"
+                )
+            else:
+                revision_goal = (
+                    "Objetivo: rever o roteiro anterior mantendo apenas alterações pedidas pelo utilizador. "
+                    f"{meal_instruction}"
+                ).strip()
+            meal_context_line = (
+                f"Refeição anterior a preservar: {previous_meal_context or 'não extraída explicitamente'}.\n"
+                f"Estado da refeição anterior: {'sem restaurante específico confirmado; preservar como limitação, não substituir' if previous_meal_unconfirmed else 'usar apenas se estiver explicitamente confirmada no contexto'}.\n"
+                if preserve_previous_meal
+                else ""
+            )
+            # Only emit the area line when a concrete zone is known. An empty
+            # placeholder ("inferir pelas paragens anteriores") used to leak into
+            # the plan as a fake area label ("na zona anterior").
+            zona_line = f"Zona anterior: {previous_area}.\n" if previous_area else ""
+            preservation_instruction = (
+                "Preserva as paragens já fundamentadas do roteiro anterior que continuam compatíveis "
+                "(reutiliza os locais já confirmados na evidência, com a mesma morada). Aplica a alteração "
+                "pedida pelo utilizador: se pedir para adicionar uma componente (por exemplo um café ou "
+                "pastelaria), inclui-a como uma paragem distinta e fundamentada, sem a confundir com a "
+                "refeição já existente; se pedir para trocar uma componente, substitui apenas essa. Não "
+                "publiques paragens genéricas nem inventes locais; se uma componente pedida não tiver "
+                "evidência, indica a limitação em vez de a omitir em silêncio ou criar uma paragem fictícia.\n"
+            )
+            # Continuity guidance is routed through conversation_context, NOT
+            # injected into the user message. Stuffing scaffolding prose into
+            # the message corrupts the planner's request heuristics (area, meal
+            # placeholders), which used to leak fragments such as "em utilizador".
+            continuity_context = (
+                f"Contexto do roteiro anterior: {str(anchors.get('last_plan_summary') or '')[:900]}.\n"
+                f"Paragens anteriores: {destinations or 'não extraídas explicitamente'}.\n"
+                f"{zona_line}"
+                f"{meal_context_line}"
+                f"{revision_goal}\n"
+                f"{preservation_instruction}"
+                "Não trates títulos de secção ou texto de resposta direta como paragens do roteiro.\n"
+                f"Preferências guardadas: {preferences or 'nenhuma preferência explícita'}.\n"
+                f"Exclusões guardadas: {exclusions or 'nenhuma exclusão explícita'}."
+            )
+        else:
+            locality_constraint = (
+                f"Area constraint: keep only places in **{previous_area}**; ignore results whose address, name, "
+                "or description indicate another area or municipality. If there are not enough confirmed indoor "
+                "alternatives in that area, state that limitation instead of switching area."
+                if previous_area
+                else "Area constraint: preserve the area inferred from the previous stops; do not switch area unless explicitly requested."
+            )
+            meal_instruction = (
+                "Keep the previous meal stop; if it was only an unconfirmed meal placeholder, say that clearly "
+                "and do not replace it with a new restaurant. "
+                if preserve_previous_meal
+                else ""
+            )
+            if rain_or_indoor_revision:
+                revision_goal = (
+                    "Goal: adapt the previous itinerary for rain by replacing outdoor stops with more indoor "
+                    "or covered options, such as museums, indoor monuments, cultural centres, and covered cafés "
+                    "near the previous stops. The direct answer must explicitly say that the itinerary was "
+                    "adapted for rain and highlight the main change. "
+                    "Keep the same area as the previous itinerary; do not use alternatives "
+                    "in other neighbourhoods/municipalities as local replacements. If there is not enough same-area "
+                    f"evidence, state that clearly. {meal_instruction}{locality_constraint}"
+                )
+            else:
+                revision_goal = (
+                    "Goal: revise the previous itinerary while preserving only the changes requested by the user. "
+                    f"{meal_instruction}"
+                ).strip()
+            meal_context_line = (
+                f"Previous meal stop to preserve: {previous_meal_context or 'not explicitly extracted'}.\n"
+                f"Previous meal status: {'no specific restaurant confirmed; preserve as a limitation, do not replace' if previous_meal_unconfirmed else 'use only if explicitly confirmed in context'}.\n"
+                if preserve_previous_meal
+                else ""
+            )
+            # Only emit the area line when a concrete zone is known. An empty
+            # placeholder ("infer from the previous stops") used to leak into the
+            # plan as a fake area label ("in the previous area").
+            zona_line = f"Previous area: {previous_area}.\n" if previous_area else ""
+            preservation_instruction = (
+                "Preserve the previously grounded stops that are still compatible "
+                "(reuse the already-confirmed places in the evidence, with the same address). Apply the "
+                "user's requested change: if they ask to add a component (for example a cafe or pastry "
+                "shop), include it as a distinct grounded stop, without merging it with the existing meal; "
+                "if they ask to swap a component, replace only that one. Do not publish generic stops or "
+                "invent places; if a requested component has no evidence, state the limitation instead of "
+                "silently omitting it or creating a fake stop.\n"
+            )
+            # Continuity guidance is routed through conversation_context, NOT
+            # injected into the user message. Stuffing scaffolding prose into
+            # the message corrupts the planner's request heuristics (area, meal
+            # placeholders), which used to leak fragments such as "in the user".
+            continuity_context = (
+                f"Previous itinerary context: {str(anchors.get('last_plan_summary') or '')[:900]}.\n"
+                f"Previous stops: {destinations or 'not explicitly extracted'}.\n"
+                f"{zona_line}"
+                f"{meal_context_line}"
+                f"{revision_goal}\n"
+                f"{preservation_instruction}"
+                "Do not treat section headings or direct-answer text as itinerary stops.\n"
+                f"Stored preferences: {preferences or 'none explicitly stored'}.\n"
+                f"Stored exclusions: {exclusions or 'none explicitly stored'}."
+            )
+        last_agents = {str(agent) for agent in anchors.get("last_response_agents") or []}
+        needs_transport_revision = bool(
+            "transport" in last_agents
+            or re.search(
+                r"\b(?:transportes?|metro|autocarros?|comboios?|train|trains|bus|buses|"
+                r"tram|trams|desloca[cç][aã]o|desloca[cç][oõ]es|pouca\s+caminhada|"
+                r"pouco\s+andar|low\s+walking|minimal\s+walking|hotel|voltar|return)\b",
+                normalized,
+            )
+        )
+        # Only fetch weather when the revision is actually weather-driven: a
+        # rain/indoor adaptation, an explicit weather mention, or a previous
+        # turn that already used weather. Otherwise injecting weather adds a
+        # stray forecast section and collapses the source footer to IPMA-only.
+        weather_requested = bool(
+            re.search(
+                r"\b(?:tempo|clima|chuva|chover|rain|raining|weather|sol|sun|sunny|"
+                r"temperatura|temperature|frio|cold|calor|heat|hot|vento|wind)\b",
+                normalized,
+            )
+        )
+        needs_weather_revision = bool(
+            rain_or_indoor_revision or weather_requested or "weather" in last_agents
+        )
+        revision_agents: List[str] = []
+        if needs_weather_revision:
+            revision_agents.append("weather")
+        if needs_transport_revision:
+            revision_agents.append("transport")
+        revision_agents.extend(["researcher", "planner"])
+
+        # Carry the previously grounded stops as reusable planner evidence so a
+        # revision can preserve them. Without this the planner only receives bare
+        # stop names, cannot ground them, and degrades to generic placeholders.
+        prior_plan_cards, _prior_source_line = self._extract_place_cards_from_answer(
+            str(anchors.get("last_plan_text") or "")
+        )
+        planner_prior_evidence = self._format_prior_plan_evidence(prior_plan_cards, language)
+        # Continuity guidance goes through conversation_context; the message is
+        # the user's own words, or the interpreter's complete rewrite of them.
+        resolution: Dict[str, Any] = {
+            "agents": revision_agents,
+            "routing_reasoning": "Planning follow-up asks to revise the previous itinerary while preserving grounded stops.",
+            "conversation_context": continuity_context.strip(),
+        }
+        if request:
+            resolution["message"] = request
+        if planner_prior_evidence:
+            resolution["planner_prior_evidence"] = planner_prior_evidence
+        return resolution
 
     def _update_conversation_anchors(
         self,
@@ -10060,6 +10149,8 @@ class MultiAgentAssistant:
         """Return whether a query asks for municipal services relative to a metro anchor."""
         normalized = unicodedata.normalize("NFKD", str(message or "").lower())
         normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+        # "Parque das Nações" is a district, not a park.
+        normalized = re.sub(r"\bparque\s+das\s+nacoes\b", " ", normalized)
         service_signal = bool(
             re.search(
                 r"\b(?:bibliotecas?|libraries?|farmacias?|pharmacies?|hospitais?|hospitals?|"
@@ -10068,10 +10159,12 @@ class MultiAgentAssistant:
                 normalized,
             )
         )
+        # "Próximo" means near only before "de/do/da" ("próximo do metro"); "o próximo 744" is the next bus.
+        near = r"(?:perto|junto|near|close|proxim[oa]s?\s+(?:de|do|da|dos|das|a|ao)\b)"
         proximity_signal = bool(
             re.search(
-                r"\b(?:perto|proximo|proxima|junto|near|close)\b.{0,40}\b(?:metro|estacao|station)\b"
-                r"|\b(?:metro|estacao|station)\b.{0,40}\b(?:perto|proximo|proxima|junto|near|close)\b",
+                rf"\b{near}.{{0,40}}\b(?:metro|estacao|station)\b"
+                rf"|\b(?:metro|estacao|station)\b.{{0,40}}\b{near}",
                 normalized,
             )
         )
@@ -10874,7 +10967,8 @@ class MultiAgentAssistant:
             brief_context = self._build_planning_follow_up_context(message) or contextual_conversation_context
             earlier_timing = str(self._get_conversation_anchors().get("last_plan_timing") or "")
             if earlier_timing and brief_context:
-                brief_context = f"{brief_context}\n{earlier_timing}"
+                # First, so the prompt's length cap never cuts the day and window.
+                brief_context = f"{earlier_timing}\n{brief_context}"
             brief_executor = ContextThreadPoolExecutor(max_workers=1)
             plan_brief_future = brief_executor.submit(
                 self.supervisor.build_plan_brief,
@@ -11366,6 +11460,13 @@ class MultiAgentAssistant:
                 str(agent_outputs.get("researcher") or "")
             )
         )
+        skip_qa_for_no_more_pagination = (
+            workers == ["researcher"]
+            and "planner" not in agents_to_call
+            and self._is_researcher_no_more_pagination_response(
+                str(agent_outputs.get("researcher") or "")
+            )
+        )
 
         if skip_qa_for_simple_weather:
             if verbose:
@@ -11504,6 +11605,26 @@ class MultiAgentAssistant:
                 },
             }
 
+        if skip_qa_for_no_more_pagination:
+            if verbose:
+                print("\n   [QA] Skipped for an exhausted result list")
+            qa_result = {
+                "complete": True,
+                "missing_data": [],
+                "required_agents": [],
+                "reasoning": "Source-backed end of the result list preserved; a retry cannot add results the source does not have.",
+                "disclaimers": [],
+                "critical_issues": [],
+                "repairable_agents": [],
+                "needs_repair": False,
+                "fact_check": {
+                    "disclaimers": [],
+                    "critical_issues": [],
+                    "repairable_agents": [],
+                    "per_agent": {},
+                },
+            }
+
         if (
             agent_outputs
             and len(workers) > 0
@@ -11513,6 +11634,7 @@ class MultiAgentAssistant:
             and not skip_qa_for_visit_confirmation_checklist
             and not skip_qa_for_structured_transport
             and not skip_qa_for_structured_route_nearby
+            and not skip_qa_for_no_more_pagination
         ):
             if verbose:
                 print("\n   [QA] Validating completeness...")

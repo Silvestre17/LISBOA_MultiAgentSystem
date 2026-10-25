@@ -517,13 +517,14 @@ class WeatherAgent(BaseAgent):
         normalized = WeatherAgent._normalize_weather_query(query)
         month_pattern = "|".join(re.escape(month) for month in sorted(_MONTH_NAME_TO_NUMBER, key=len, reverse=True))
         month_first = re.search(
-            rf"\b({month_pattern})\s+(\d{{1,2}})(?:st|nd|rd|th)?(?:,)?\s+(\d{{4}})\b",
+            rf"\b({month_pattern})\s+(\d{{1,2}})(?:st|nd|rd|th)?\b(?:,?\s+(\d{{4}})\b)?",
             normalized,
         )
         day_first = re.search(
-            rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+(?:de\s+)?({month_pattern})(?:\s+de)?\s+(\d{{4}})\b",
+            rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+(?:de\s+|of\s+)?({month_pattern})\b(?:(?:\s+de)?\s+(\d{{4}})\b)?",
             normalized,
         )
+        today = datetime.now()
         for match, month_group, day_group, year_group in (
             (month_first, 1, 2, 3),
             (day_first, 2, 1, 3),
@@ -534,7 +535,13 @@ class WeatherAgent(BaseAgent):
             if not month:
                 continue
             try:
-                return datetime(int(match.group(year_group)), month, int(match.group(day_group)))
+                if match.group(year_group):
+                    return datetime(int(match.group(year_group)), month, int(match.group(day_group)))
+                # "26 de outubro" without a year is the next such day.
+                candidate = datetime(today.year, month, int(match.group(day_group)))
+                if candidate.date() < today.date():
+                    candidate = candidate.replace(year=today.year + 1)
+                return candidate
             except ValueError:
                 continue
         return None
@@ -858,6 +865,9 @@ class WeatherAgent(BaseAgent):
         asks_temperature = bool(re.search(r"\b(temperature|temperatura|temp)\b", normalized))
         if has_climate_term:
             return True
+        # "26 de outubro" names a day to forecast, not a month's climate.
+        if cls._extract_explicit_forecast_date(user_message) is not None:
+            return False
         if has_average_term and has_month_or_season and asks_temperature:
             return True
         if has_month_or_season and not has_short_range_anchor:

@@ -625,6 +625,21 @@ _LOCATION_CONTEXT_EXTRACTORS: Tuple[re.Pattern, ...] = (
 
 _LOCATION_SUFFIX_SPLITTERS: Tuple[re.Pattern, ...] = (
     re.compile(r"\s*\?\s*.*$"),
+    # "o Rossio no fim": when, not where.
+    re.compile(r"\s+(?:no\s+fim|no\s+final|ao\s+fim\s+do\s+dia|at\s+the\s+end|in\s+the\s+end|afterwards)\s*$", re.IGNORECASE),
+    # "o Rossio no domingo à tarde", "Belém on Monday": a day or part of the day,
+    # never "Segunda Circular", "Quinta da Regaleira", "São Domingos", or "Avenida 24 de Julho".
+    re.compile(
+        r"\s*,?\s+(?:(?:no|na|ao|nesta|neste|esta|este|pr[oó]xim[oa]|on|this|next)\s+"
+        r"(?:segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo)(?:-feira)?\b|"
+        r"(?:segunda|ter[çc]a|quarta|quinta|sexta)-feira\b|"
+        r"(?:on\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|"
+        r"(?:amanh[ãa]|hoje|today|tomorrow|tonight|logo)\b|"
+        r"(?:de|à|a|ao\s+fim\s+da|in\s+the)\s+(?:manh[ãa]|tarde|noite|morning|afternoon|evening)\b|"
+        r"no\s+dia\s+\d{1,2}\b"
+        r").*$",
+        re.IGNORECASE,
+    ),
     re.compile(
         r"\s*(?:hoje|amanh[ãa]|today|tomorrow|morning|afternoon|evening)?\s*(?:[,;]|\s+)\s*"
         r"(?:em\s+que\s+demora|quanto\s+(?:tempo\s+)?(?:demoro|demora|leva)|how\s+long)\b.*$",
@@ -1239,6 +1254,10 @@ def _build_dynamic_location_ambiguity_hints(raw_location: str) -> List[str]:
             return []
     except NameError:
         pass
+    from tools.place_coordinates import lookup_place_by_title
+
+    if lookup_place_by_title(cleaned):
+        return []
     try:
         from tools.metrolisboa_api import get_landmark_info
 
@@ -2625,6 +2644,13 @@ def resolve_location_query(
     cp_match = _resolve_known_cp_station(query)
     if cp_match:
         return cp_match
+
+    from tools.place_coordinates import lookup_place_by_title
+
+    catalogue_place = lookup_place_by_title(query)
+    if catalogue_place:
+        title, lat, lon = catalogue_place
+        return {**resolve_coordinates(lat, lon, label=title), "query": query, "raw_query": raw_query}
 
     geocoded = geocode_location_name(
         query,

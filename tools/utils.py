@@ -57,6 +57,22 @@ def without_estate_names(text: str) -> str:
     return _QUINTA_ESTATE_RE.sub(" ", text or "")
 
 
+# "Segunda-feira" is a Monday, not a fair ("feira").
+_WEEKDAY_FEIRA_RE = re.compile(r"\b(segunda|ter[cç]a|quarta|quinta|sexta)(?:-|\s+)feiras?\b", re.IGNORECASE)
+
+
+def without_weekday_feira(text: str) -> str:
+    """Write "segunda-feira" as "segunda" before looking for fair or market words.
+
+    Args:
+        text: User message or query.
+
+    Returns:
+        The text with each weekday's "-feira" removed.
+    """
+    return _WEEKDAY_FEIRA_RE.sub(r"\1", str(text or ""))
+
+
 LISBON_SUN_REFERENCE = (38.7223, -9.1393)
 
 

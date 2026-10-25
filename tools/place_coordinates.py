@@ -74,6 +74,50 @@ def lookup_place_coordinates(url: Optional[str]) -> Optional[Tuple[float, float]
     return load_place_coordinates().get(str(url).strip())
 
 
+@lru_cache(maxsize=1)
+def _place_title_index() -> Dict[str, Tuple[str, str]]:
+    """Return (title, URL) of each place with coordinates, keyed by its normalized English and Portuguese title."""
+    from tools.location_resolver import normalize_location_text
+    from tools.visitlisboa_api import _localize_place_title
+
+    try:
+        places = json.loads(Path(Config.PATH_VISIT_LISBOA_PLACES).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    coordinates = load_place_coordinates()
+    index: Dict[str, Tuple[str, str]] = {}
+    for place in places:
+        url, title = str(place.get("url") or ""), str(place.get("title") or "").strip()
+        # Area pages ("Loures", "Alfama") and agencies ("Fertagus") are not
+        # places to go to; the geocoder resolves an area better.
+        category = str(place.get("category") or "").strip().lower()
+        if not title or url not in coordinates or category not in _TITLE_LOOKUP_CATEGORIES:
+            continue
+        portuguese = _localize_place_title(title, language="pt")
+        for name, display in ((title, title), (portuguese, portuguese)):
+            key = normalize_location_text(name)
+            if key:
+                index.setdefault(key, (display, url))
+    return index
+
+
+def lookup_place_by_title(name: str) -> Optional[Tuple[str, float, float]]:
+    """Return (title, lat, lon) of the catalogue place named exactly ``name``.
+
+    The planner and the follow-up interpreter pass stop names as the catalogue
+    shows them, in English or Portuguese ("Museum of Portuguese Decorative
+    Arts"); geocoders often miss those names, the catalogue does not.
+    """
+    from tools.location_resolver import normalize_location_text
+
+    match = _place_title_index().get(normalize_location_text(name))
+    if not match:
+        return None
+    title, url = match
+    lat, lon = load_place_coordinates()[url]
+    return title, lat, lon
+
+
 def _significant_tokens(text: str) -> set[str]:
     """Return lower-case name tokens that can confirm a geocoder match."""
     from tools.location_resolver import normalize_location_text
@@ -100,6 +144,15 @@ _LANDMARK_CATEGORIES = {
     "family & kids",
     "parks & gardens",
     "beaches",
+}
+# Places a route can end at, found by their catalogue name.
+_TITLE_LOOKUP_CATEGORIES = _LANDMARK_CATEGORIES | {
+    "restaurant",
+    "restaurants & cafes",
+    "coffee shop",
+    "fado",
+    "bars & nightlife",
+    "shopping",
 }
 
 

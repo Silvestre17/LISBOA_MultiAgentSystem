@@ -2079,8 +2079,9 @@ def _compact_transport_arrivals_markdown(text: str) -> Optional[str]:
     if not lines:
         return None
 
+    # A line code always has a digit (15E, 732, 1716); "🚇 MAAT - Museu ... → Rossio" is a route title.
     entry_header_re = re.compile(
-        r"^(?:[-*•]\s*)?(?P<emoji>[🚌🚋🚇🚆])\s*(?:\*\*)?(?P<line>[0-9A-Z]{1,5})(?:\*\*)?\s*[-–—]\s*(?:(?:\*\*)?(?:Destino|Destination)(?:\*\*)?\s*:\s*)?(?P<destination>.+)$",
+        r"^(?:[-*•]\s*)?(?P<emoji>[🚌🚋🚇🚆])\s*(?:\*\*)?(?P<line>(?=[A-Z]{0,4}\d)[0-9A-Z]{1,5})(?:\*\*)?\s*[-–—]\s*(?:(?:\*\*)?(?:Destino|Destination)(?:\*\*)?\s*:\s*)?(?P<destination>.+)$",
         re.IGNORECASE,
     )
     alternate_header_re = re.compile(

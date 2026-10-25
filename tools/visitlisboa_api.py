@@ -57,10 +57,10 @@ except ModuleNotFoundError:
 
 try:
     from tools.place_coordinates import lookup_place_coordinates
-    from tools.utils import lisbon_now, without_estate_names
+    from tools.utils import lisbon_now, without_estate_names, without_weekday_feira
 except ImportError:  # Standalone execution: python tools/visitlisboa_api.py
     from place_coordinates import lookup_place_coordinates
-    from utils import lisbon_now, without_estate_names
+    from utils import lisbon_now, without_estate_names, without_weekday_feira
 
 logger = logging.getLogger(__name__)
 
@@ -1120,6 +1120,10 @@ def _compact_place_ticket_price_text(value: Optional[str], language: str = "en",
     )
     cleaned = re.sub(r"\s*;\s*", "; ", cleaned).strip(" ;")
     cleaned = re.sub(r"(?:;\s*){2,}", "; ", cleaned).strip(" ;")
+    # The scraped ticket box often holds only its button labels ("+ info",
+    # "BUY", "Tickets & Offers") or a URL: that is not a price.
+    if not re.search(r"\d|€|\b(?:free|gr[aá]tis|gratuit[oa])\b", cleaned, flags=re.IGNORECASE):
+        return ""
 
     if len(cleaned) > max_chars:
         parts = [part.strip() for part in cleaned.split(";") if part.strip()]
@@ -1247,12 +1251,25 @@ def _is_http_url(value: Any) -> bool:
     return text.startswith(("https://", "http://"))
 
 
+_TRACKING_QUERY_PARAM_RE = re.compile(r"^(?:utm_[a-z]+|fbclid|gclid)=", re.IGNORECASE)
+
+
+def _strip_tracking_params(url: str) -> str:
+    """Drop tracking parameters (utm_*, fbclid, gclid) that scraped links carry."""
+    base, separator, rest = url.partition("?")
+    if not separator:
+        return url
+    query, hash_mark, fragment = rest.partition("#")
+    kept = [part for part in query.split("&") if part and not _TRACKING_QUERY_PARAM_RE.match(part)]
+    return base + ("?" + "&".join(kept) if kept else "") + hash_mark + fragment
+
+
 def _format_markdown_link(label: str, url: Any) -> str:
     """Build a Markdown link only when the URL is usable."""
     clean_url = str(url or "").strip()
     if not _is_http_url(clean_url):
         return ""
-    return f"[{label}]({clean_url})"
+    return f"[{label}]({_strip_tracking_params(clean_url)})"
 
 
 def _preserve_source_url(url: Any) -> str:
@@ -2333,6 +2350,7 @@ _EVENT_NAMED_ENTITY_HINTS = {
 
 def _extract_specific_event_lookup_phrase(query: Optional[str]) -> Optional[str]:
     """Extracts a specific event name from a natural-language query when present."""
+    query = without_weekday_feira(query)
     prefixed = _extract_prefixed_lookup_phrase(
         query,
         noise_tokens=_EVENT_SPECIFIC_LOOKUP_NOISE_TOKENS,
@@ -3062,7 +3080,10 @@ _SPECIFIC_PLACE_LOOKUP_TYPE_TOKENS = {
     "monument", "monuments", "monumento", "monumentos",
 }
 
-_SPECIFIC_PLACE_LOOKUP_NOISE_TOKENS = _GENERIC_PLACE_QUERY_TOKENS - _SPECIFIC_PLACE_LOOKUP_TYPE_TOKENS
+# A requested day ("MAAT monday") selects the hours shown, not the place.
+_SPECIFIC_PLACE_LOOKUP_NOISE_TOKENS = (_GENERIC_PLACE_QUERY_TOKENS - _SPECIFIC_PLACE_LOOKUP_TYPE_TOKENS) | {
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+}
 
 _VISITLISBOA_ONLY_HYBRID_CATEGORIES = {
     "museums & monuments", "restaurants", "hotels", "view points", "tours",
