@@ -11,7 +11,8 @@
 #     - Lisbon-specific parameters for IPMA API
 #
 #   Security Note:
-#     API keys are loaded from environment variables (.env file).
+#     API keys are loaded from environment variables: Streamlit secrets
+#     (root-level keys), the process environment and the .env file.
 #     Never commit actual API keys to version control.
 # ==========================================================================
 
@@ -19,13 +20,36 @@
 # pip install python-dotenv
 
 import os
-import tempfile
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load environment variables from .env file (if present)
-# This allows secure storage of API keys outside the codebase
+from tools.runtime_paths import get_runtime_data_root, is_hosted_deployment
+
+
+def _load_streamlit_secrets() -> None:
+    """Expose root-level Streamlit secrets as environment variables.
+
+    ``streamlit run`` parses ``secrets.toml`` when the server starts and copies
+    root-level values into ``os.environ`` (Streamlit Community Cloud provides
+    the Secrets panel as that file). Loading again here is a cached no-op in
+    that case and guarantees the values exist before the settings below are
+    read, whatever started the server. Scripts, evaluation runs and CI do not
+    run a Streamlit server and load nothing.
+    """
+    streamlit_module = sys.modules.get("streamlit")
+    if streamlit_module is None:
+        return
+    from streamlit import runtime
+
+    if runtime.exists():
+        streamlit_module.secrets.load_if_toml_exists()
+
+
+# Precedence: Streamlit secrets, then the process environment, then .env
+# (load_dotenv never overrides a variable that is already set).
+_load_streamlit_secrets()
 load_dotenv()
 
 __all__ = ["Config"]
@@ -101,27 +125,17 @@ class Config:
     # Directory containing all data collection scripts and outputs
     DATA_COLLECTION_DIR = BASE_DIR / "data_collection"
 
-    # Writable runtime data root for generated databases in hosted deployments.
-    RUNTIME_DATA_DIR = Path(
-        os.getenv(
-            "LISBOA_RUNTIME_DATA_DIR",
-            str(Path(tempfile.gettempdir()) / "lisboa_runtime")
-            if os.getenv("SPACE_ID") or os.getenv("HF_SPACE_ID") or os.getenv("SPACE_HOST")
-            else str(BASE_DIR / "data"),
-        )
-    )
+    # Hugging Face Space, Streamlit Community Cloud, or LISBOA_HOSTED=true.
+    # See tools/runtime_paths.py for the detection rules.
+    IS_HOSTED = is_hosted_deployment()
+
+    # Writable runtime data root for generated databases: data/ locally, the
+    # system temporary directory on hosted deployments (LISBOA_RUNTIME_DATA_DIR
+    # overrides both).
+    RUNTIME_DATA_DIR = get_runtime_data_root()
 
     # Directory for ChromaDB vector store (persistent embeddings)
-    VECTOR_DB_DIR = Path(
-        os.getenv(
-            "VECTOR_DB_DIR",
-            str(
-                RUNTIME_DATA_DIR / "vector_db"
-                if RUNTIME_DATA_DIR != BASE_DIR / "data"
-                else BASE_DIR / "data" / "vector_db"
-            ),
-        )
-    )
+    VECTOR_DB_DIR = Path(os.getenv("VECTOR_DB_DIR", str(RUNTIME_DATA_DIR / "vector_db")))
 
     # Runtime vector database artifact download.
     # Hosted deployments should keep data/vector_db out of the Space git history
@@ -139,14 +153,11 @@ class Config:
     VECTOR_DB_RELEASE_FORCE_DOWNLOAD = _env_bool("VECTOR_DB_RELEASE_FORCE_DOWNLOAD", False)
     VECTOR_DB_RELEASE_TIMEOUT_SECONDS = int(os.getenv("VECTOR_DB_RELEASE_TIMEOUT_SECONDS", "120"))
 
-    # Streamlit cache policy for heavyweight startup resources. Leave unset for
-    # per-process caching until redeploy/restart. Set a positive number of
-    # seconds only if a hosted app must refresh release-backed resources without
-    # a new deployment.
-    STREAMLIT_RESOURCE_CACHE_TTL_SECONDS = _env_positive_int_or_none(
-        "STREAMLIT_RESOURCE_CACHE_TTL_SECONDS",
-        None,
-    )
+    # Hosted deployments stay up for days while the workflows republish the
+    # vector DB daily and the operators update their GTFS feeds. At most once
+    # per interval, a request starts a background check that swaps in newer
+    # data without restarting the app.
+    RUNTIME_DATA_REFRESH_SECONDS = 3600 * _env_positive_int_or_none("LISBOA_DATA_REFRESH_HOURS", 6)
 
     # Versioned local LLM pricing snapshot used for runtime/eval cost accounting.
     # This avoids live pricing lookups during user requests and keeps summaries
@@ -183,14 +194,19 @@ class Config:
     # MODEL_PROVIDER = "openai"
     # MODEL_PROVIDER = "lmstudio"
 
-    # Production sidebar guardrails.
-    # Keep these False on Streamlit Cloud so the app only exposes the selected
-    # provider/model and reads credentials from environment variables or
-    # Streamlit secrets.
-    ENABLE_PROVIDER_SELECTOR = False
-    # ENABLE_PROVIDER_SELECTOR = True
-    ENABLE_PROVIDER_CREDENTIAL_INPUTS = False
-    # ENABLE_PROVIDER_CREDENTIAL_INPUTS = True
+    # Visitor model settings in the sidebar.
+    # When True, each visitor can switch their own browser session to any
+    # OpenAI-compatible endpoint with their own key and model. The key stays in
+    # that Streamlit session and is never written to the environment, this
+    # class, files or traces. The server provider above remains the default.
+    ALLOW_VISITOR_LLM_SETTINGS = _env_bool("LISBOA_ALLOW_VISITOR_LLM_SETTINGS", True)
+
+    # Whether a visitor base URL may resolve to a loopback, private, link-local,
+    # reserved or multicast address (local servers such as LM Studio). Off by
+    # default on hosted deployments, so visitors cannot make the server call
+    # its own internal network; there, every visitor request is also re-checked
+    # at connection time and redirects are not followed (agent/llm_factory.py).
+    ALLOW_PRIVATE_LLM_HOSTS = _env_bool("LISBOA_ALLOW_PRIVATE_LLM_HOSTS", not IS_HOSTED)
 
     # =========================================================================
     # API KEYS (Environment Variables)
@@ -239,10 +255,34 @@ class Config:
     # =========================================================================
     # EMBEDDINGS CONFIGURATION
     # =========================================================================
-    # Embedding model for vector store (runs locally via HuggingFace)
-    # BAAI/bge-m3 is multilingual and works well with Portuguese/English
-    # Alternatives: sentence-transformers/all-MiniLM-L6-v2 (faster, English-only)
+    # Embedding model of the vector store. BAAI/bge-m3 is multilingual and
+    # works well with Portuguese/English. The ChromaDB store is always built
+    # with the local model (L2-normalised vectors); queries can use either:
+    #   - 'local'      : sentence-transformers on this machine; needs
+    #                    requirements_local_embeddings.txt (torch, ~3-4 GB RAM)
+    #   - 'cloudflare' : the same model on Cloudflare Workers AI; needs
+    #                    CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN
+    #   - 'auto'       : 'cloudflare' when both credentials are set, else 'local'
     EMBEDDING_MODEL_NAME = "BAAI/bge-m3"
+    EMBEDDINGS_BACKEND = os.getenv("LISBOA_EMBEDDINGS_BACKEND", "auto").strip().lower()
+    CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID")
+    # Cloudflare API token with the "Workers AI: Read" permission only.
+    CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN")
+    CLOUDFLARE_EMBEDDING_MODEL = "@cf/baai/bge-m3"
+
+    @classmethod
+    def embeddings_backend(cls) -> str:
+        """Return the query embeddings backend in use: ``local`` or ``cloudflare``.
+
+        Returns:
+            str: ``LISBOA_EMBEDDINGS_BACKEND`` when it names a backend; otherwise
+            ``cloudflare`` when both Cloudflare credentials are set, else ``local``.
+        """
+        if cls.EMBEDDINGS_BACKEND in {"local", "cloudflare"}:
+            return cls.EMBEDDINGS_BACKEND
+        if cls.CLOUDFLARE_ACCOUNT_ID and cls.CLOUDFLARE_API_TOKEN:
+            return "cloudflare"
+        return "local"
 
     # =========================================================================
     # LLM PARAMETERS

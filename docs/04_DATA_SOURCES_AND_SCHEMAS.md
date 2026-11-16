@@ -25,7 +25,7 @@ LISBOA combines live requests, short-lived caches, static local data, scheduled 
 
 | Workflow | Trigger | Output |
 |---|---|---|
-| `data_pipeline.yml` | Daily at **04:00 UTC**; manual runs can target events, places, or both | Events refreshed daily and places on Mondays, committed as VisitLisboa JSON artifacts |
+| `data_pipeline.yml` | Daily at **04:00 UTC**; manual runs can target events, places, or both | Events refreshed daily and places weekly (retried the next day after a failed run), committed as VisitLisboa JSON artifacts |
 | `sync_vector_db.yml` | After a successful `Update Lisbon Data` run; manual runs | Incremental events and places sync, published as complete or staging GitHub Release assets with manifests |
 | `sync_transport_runtime_data.yml` | Daily at **03:25 UTC**; pushes that change the transport release code; manual runs | Carris Urban and CP runtime ZIP files and a manifest, replaced in place |
 | `deploy_huggingface_space.yml` | Pushes to `main` that change the app; completed vector or transport syncs; manual runs | Deployment bundle uploaded to the Hugging Face Space |

@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
+from agent.llm_factory import LLMConnection
 from agent.utils.langsmith_tracing import deadline_executor
 
 try:
@@ -32,7 +33,7 @@ except ModuleNotFoundError:
     from config import Config
 
 
-_LOCAL_LLM_PROVIDERS = {"lmstudio"}
+_LOCAL_LLM_PROVIDERS = {"lmstudio", "local"}
 logger = logging.getLogger(__name__)
 
 
@@ -242,7 +243,10 @@ def get_agent_tools(agent_name: str) -> List:
 # ==========================================================================
 
 
-def get_agent_llm(agent_name: str) -> BaseChatModel:
+def get_agent_llm(
+    agent_name: str,
+    connection: Optional[LLMConnection] = None,
+) -> BaseChatModel:
     """
     Creates an LLM instance configured for a specific agent.
 
@@ -251,13 +255,15 @@ def get_agent_llm(agent_name: str) -> BaseChatModel:
 
     Args:
         agent_name (str): Name of the agent.
+        connection: Visitor endpoint for this session, or None for the
+            server provider.
 
     Returns:
         BaseChatModel: Configured LLM for the agent.
     """
     from agent.llm_factory import LLMFactory
 
-    return LLMFactory.get_agent_llm(agent_name)
+    return LLMFactory.get_agent_llm(agent_name, connection)
 
 
 # ==========================================================================
@@ -488,25 +494,42 @@ class BaseAgent:
         base LLM directly.
     """
 
-    def __init__(self, agent_name: str):
+    def __init__(self, agent_name: str, connection: Optional[LLMConnection] = None):
         """
         Initializes the base agent.
 
         Args:
             agent_name: Name of this agent (for config lookup).
+            connection: Visitor endpoint for this session, or None for the
+                server provider.
         """
         self.agent_name = agent_name
         self.tools = get_agent_tools(agent_name)
-        agent_config = Config.AGENT_MODELS().get(
-            agent_name, Config.DEFAULT_AGENT_MODEL()
-        )
-        self.llm_provider = agent_config.get("provider", Config.MODEL_PROVIDER)
-        self.llm_model_name = agent_config.get("model", "Unknown")
-        self.llm_temperature = agent_config.get("temperature", Config.TEMPERATURE)
-        self.llm = get_agent_llm(agent_name)
         self._llm_usage_events: List[Dict[str, Any]] = []
         self._llm_usage_call_index = 0
         self._tool_calls_log: List[Dict[str, Any]] = []
+        self.configure_llm(connection)
+
+    def configure_llm(self, connection: Optional[LLMConnection] = None) -> None:
+        """
+        Builds this agent's LLM from the server provider or a session connection.
+
+        Args:
+            connection: Visitor endpoint for this session, or None for the
+                server provider configured in ``config.py``.
+        """
+        self.llm = get_agent_llm(self.agent_name, connection)
+        if connection is None:
+            agent_config = Config.AGENT_MODELS().get(
+                self.agent_name, Config.DEFAULT_AGENT_MODEL()
+            )
+            self.llm_provider = agent_config.get("provider", Config.MODEL_PROVIDER)
+            self.llm_model_name = agent_config.get("model", "Unknown")
+            self.llm_temperature = agent_config.get("temperature", Config.TEMPERATURE)
+        else:
+            self.llm_provider = connection.provider
+            self.llm_model_name = connection.model
+            self.llm_temperature = getattr(self.llm, "temperature", None)
 
         # Bind tools if this agent has any
         if self.tools:
@@ -1055,7 +1078,7 @@ class BaseAgent:
         last_exception = None
         prepared_messages = (
             _normalize_messages_for_lmstudio(messages)
-            if getattr(self, "llm_provider", "") == "lmstudio"
+            if is_local_provider(getattr(self, "llm_provider", ""))
             else messages
         )
         for attempt in range(retries + 1):

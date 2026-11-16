@@ -3,9 +3,9 @@
 #   - André Filipe Gomes Silvestre, 20240502
 #
 #   Streamlit user interface for LISBOA, the Lisbon Itinerary System Based On
-#   AI. Provides the interactive chat workflow, provider selection, quick
-#   actions, tracing controls, debug visibility, and response rendering for the
-#   multi-agent runtime.
+#   AI. Provides the interactive chat workflow, per-session model settings,
+#   quick actions, tracing controls, debug visibility, and response rendering
+#   for the multi-agent runtime.
 # ==========================================================================
 
 import logging
@@ -25,10 +25,11 @@ import os
 import re
 import sys
 import time
+import traceback
 import unicodedata
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional, Tuple
-from urllib.parse import quote
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import streamlit as st
@@ -37,6 +38,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 LISBON_TIMEZONE_NAME = "Europe/Lisbon"
+THESIS_URL = "https://hdl.handle.net/10362/207399"
 ARTICLE_DOI_URL = "https://doi.org/10.1016/j.rineng.2026.113369"
 SOFTWARE_DOI_URL = "https://doi.org/10.5281/zenodo.23322220"
 
@@ -56,22 +58,12 @@ def format_lisbon_now() -> str:
     return datetime.now(get_lisbon_timezone()).strftime("%Y-%m-%d %H:%M")
 
 
-# WORKAROUND: Fix Streamlit file watcher crash with PyTorch
-try:
-    import torch
-
-    class _StreamlitTorchPath:
-        _path = []
-
-    torch.classes.__path__ = _StreamlitTorchPath()
-except ImportError:
-    pass
-except Exception as exc:
-    logging.getLogger(__name__).debug("Streamlit torch path workaround skipped: %s", exc)
-
 sys.path.insert(0, ".")
 
+from agent.llm_factory import LLMConnection, LLMFactory
+from agent.utils.model_connection_probe import check_tool_calling
 from agent.utils.startup_resources import run_startup_preload as _run_startup_preload_impl
+from agent.utils.startup_resources import schedule_runtime_data_refresh
 from config import Config
 
 PORTUGAL_FLAG_SVG = """
@@ -135,8 +127,8 @@ FLAG_IMAGE_URIS = {
 
 
 LANGUAGE_OPTIONS = {
-    "pt": {"label": "Português", "short": "PT"},
-    "en": {"label": "English", "short": "EN"},
+    "pt": {"label": "Português"},
+    "en": {"label": "English"},
 }
 
 # ==========================================================================
@@ -150,17 +142,35 @@ TRANSLATIONS = {
         "app_subtitle": "Lisbon Itinerary System Based On AI",
         "settings": "System Settings",
         "language": "Language",
-        "llm_provider": "AI Provider",
-        "select_provider": "Select Engine",
-        "api_credentials": "Authentication",
-        "api_key": "API Key",
-        "api_key_placeholder": "Enter key...",
-        "local_url": "Server URL",
-        "local_url_placeholder": "http://localhost:1234/v1",
-        "model_name": "Model",
-        "model_name_placeholder": "e.g., llama3.2",
-        "save_credentials": "Connect System",
-        "assistant_ready": "System Online",
+        "llm_active_server": "Active model: LISBOA default.",
+        "llm_active_custom": "Active model: {model} ({host}).",
+        "llm_server_unavailable": "The LISBOA default model is not available right now. Add your own provider below to continue.",
+        "llm_preset": "Service",
+        "llm_preset_other": "Other",
+        "llm_base_url": "Base URL",
+        "llm_api_key": "API key",
+        "llm_model": "Model",
+        "llm_model_help": "Any OpenAI-compatible model that supports tool calling.",
+        "llm_key_privacy": "🔐 Your key is used only in this browser session and is not stored.",
+        "llm_save": "Save and test",
+        "llm_use_default": "Use LISBOA default",
+        "llm_checking": "Testing the model...",
+        "llm_check_ok": "Connected to {model}. Your next messages use this model.",
+        "llm_default_restored": "Back to the LISBOA default model.",
+        "llm_error_invalid_base_url": "Enter a valid base URL that starts with https:// or http://.",
+        "llm_error_missing_model": "Enter the model name.",
+        "llm_error_private_host": "This address is not allowed on the hosted app. Use the provider's public URL.",
+        "llm_error_auth": "The provider rejected the API key. Check the key and try again.",
+        "llm_error_not_found": "Model or URL not found. Check the base URL and the model name.",
+        "llm_error_rate_limit": "The provider refused the request because of a rate or quota limit. Try again later.",
+        "llm_error_connection": "Could not reach the provider. Check the base URL.",
+        "llm_error_bad_request": "The provider rejected the test request. Check the model name and that the model supports tool calling.",
+        "llm_error_no_tool_call": "The model answered but did not use the test tool. LISBOA needs a model with tool calling.",
+        "llm_error_unknown": "The model test failed. Check the settings and try again.",
+        "llm_setup_prompt": "To start, add your own AI provider in ⚙️ System Settings in the sidebar.",
+        "llm_server_setup_prompt": "Configure the production credentials in environment variables or Streamlit secrets to get started.",
+        "llm_ready_prompt": "The model is ready. Send a prompt to start the assistant.",
+        "llm_switch_hint": "You can also use your own AI provider in ⚙️ System Settings.",
         "initialization_failed": "Connection Failed",
         "quick_actions": "Quick Actions",
         "weather_summary": "Weather Report",
@@ -294,7 +304,7 @@ TRANSLATIONS = {
         "info_data_sources": "Integrated Sources",
         "info_author": "Author",
         "info_author_project": "LISBOA: Lisbon Itinerary System Based On AI",
-        "info_author_role": "Master's Student",
+        "info_author_role": "MSc Graduate",
         "info_author_degree": "Data Science and Advanced Analytics",
         "info_author_affiliation": "NOVA IMS - Universidade NOVA de Lisboa",
         "info_author_year": "Academic year 2025/2026",
@@ -302,6 +312,7 @@ TRANSLATIONS = {
         "info_supervisors_names": "Prof. Dr. Bruno Jardim   •   Prof. Dr. Miguel de Castro Neto",
         "info_author_github": "GitHub",
         "info_author_linkedin": "LinkedIn",
+        "info_author_thesis": "Master's Thesis",
         "info_author_article": "Article",
         "info_author_software": "Software DOI",
         "info_publication_label": "Published in",
@@ -315,17 +326,35 @@ TRANSLATIONS = {
         "app_subtitle": "Lisbon Itinerary System Based On AI",
         "settings": "Configurações",
         "language": "Idioma / Language",
-        "llm_provider": "Motor de IA",
-        "select_provider": "Selecionar Motor",
-        "api_credentials": "Autenticação",
-        "api_key": "Chave API",
-        "api_key_placeholder": "Insira a chave...",
-        "local_url": "URL do Servidor",
-        "local_url_placeholder": "http://localhost:1234/v1",
-        "model_name": "Modelo",
-        "model_name_placeholder": "ex: llama3.2",
-        "save_credentials": "Ligar Sistema",
-        "assistant_ready": "Sistema Online",
+        "llm_active_server": "Modelo ativo: predefinido do LISBOA.",
+        "llm_active_custom": "Modelo ativo: {model} ({host}).",
+        "llm_server_unavailable": "O modelo predefinido do LISBOA não está disponível de momento. Adicione o seu próprio fornecedor abaixo para continuar.",
+        "llm_preset": "Serviço",
+        "llm_preset_other": "Outro",
+        "llm_base_url": "URL base",
+        "llm_api_key": "Chave de API",
+        "llm_model": "Modelo",
+        "llm_model_help": "Qualquer modelo compatível com OpenAI que suporte chamadas de ferramentas (tool calling).",
+        "llm_key_privacy": "🔐 A sua chave só é usada nesta sessão do browser e não fica guardada.",
+        "llm_save": "Guardar e testar",
+        "llm_use_default": "Usar o modelo predefinido",
+        "llm_checking": "A testar o modelo...",
+        "llm_check_ok": "Ligado a {model}. As próximas mensagens usam este modelo.",
+        "llm_default_restored": "Voltou ao modelo predefinido do LISBOA.",
+        "llm_error_invalid_base_url": "Indique um URL base válido, começado por https:// ou http://.",
+        "llm_error_missing_model": "Indique o nome do modelo.",
+        "llm_error_private_host": "Este endereço não é permitido na aplicação alojada. Use o URL público do fornecedor.",
+        "llm_error_auth": "O fornecedor recusou a chave de API. Verifique a chave e tente novamente.",
+        "llm_error_not_found": "Modelo ou URL não encontrado. Verifique o URL base e o nome do modelo.",
+        "llm_error_rate_limit": "O fornecedor recusou o pedido por limite de pedidos ou de quota. Tente novamente mais tarde.",
+        "llm_error_connection": "Não foi possível contactar o fornecedor. Verifique o URL base.",
+        "llm_error_bad_request": "O fornecedor recusou o pedido de teste. Verifique o nome do modelo e se este suporta chamadas de ferramentas.",
+        "llm_error_no_tool_call": "O modelo respondeu, mas não usou a ferramenta de teste. O LISBOA precisa de um modelo com chamadas de ferramentas.",
+        "llm_error_unknown": "O teste do modelo falhou. Verifique os dados e tente novamente.",
+        "llm_setup_prompt": "Para começar, adicione o seu próprio fornecedor de IA em ⚙️ Configurações, na barra lateral.",
+        "llm_server_setup_prompt": "Configure as credenciais de produção nas variáveis de ambiente ou nos Streamlit secrets para começar.",
+        "llm_ready_prompt": "O modelo está pronto. Envie uma pergunta para iniciar o assistente.",
+        "llm_switch_hint": "Também pode usar o seu próprio fornecedor de IA em ⚙️ Configurações.",
         "initialization_failed": "Falha na Ligação",
         "quick_actions": "Ações Rápidas",
         "weather_summary": "Boletim Meteorológico",
@@ -459,7 +488,7 @@ TRANSLATIONS = {
         "info_data_sources": "Fontes Integradas",
         "info_author": "Autor",
         "info_author_project": "LISBOA: Lisbon Itinerary System Based On AI",
-        "info_author_role": "Mestrando",
+        "info_author_role": "Mestre",
         "info_author_degree": "Data Science and Advanced Analytics",
         "info_author_affiliation": "NOVA IMS - Universidade NOVA de Lisboa",
         "info_author_year": "Ano letivo 2025/2026",
@@ -467,6 +496,7 @@ TRANSLATIONS = {
         "info_supervisors_names": "Prof. Dr. Bruno Jardim      •      Prof. Dr. Miguel de Castro Neto",
         "info_author_github": "GitHub",
         "info_author_linkedin": "LinkedIn",
+        "info_author_thesis": "Tese de Mestrado",
         "info_author_article": "Artigo",
         "info_author_software": "DOI do software",
         "info_publication_label": "Publicado em",
@@ -854,71 +884,58 @@ footer {{ visibility: hidden; }}
     text-align: center;
 }}
 
-/* Language selector: avoids OS emoji flag rendering and Streamlit widget truncation */
+/* Language selector: flag images avoid OS emoji flag rendering */
 .language-selector-label {{
     margin: 0 0 0.45rem 0;
     color: var(--text-main);
     font-size: 0.88rem;
     font-weight: 500;
 }}
-.language-toggle {{
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 0.55rem;
-    width: 100%;
-    margin: 0.15rem 0 0.9rem;
-}}
-.language-toggle a,
-.language-toggle span.language-option {{
+[class*="st-key-lang_"] button {{
     min-width: 0;
     min-height: 2.7rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
     padding: 0.42rem 0.56rem;
-    border: 1px solid #d9dee8;
-    border-radius: 12px;
-    background: #fff;
-    color: var(--text-main);
-    text-decoration: none !important;
-    font-size: 0.88rem;
-    font-weight: 700;
-    line-height: 1.05;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-    overflow: hidden;
-    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+    border: 1px solid #d9dee8 !important;
+    background: #fff !important;
+    color: var(--text-main) !important;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
 }}
-.language-toggle a:hover {{
-    border-color: var(--primary-red);
-    background: #fff7f4;
-    color: var(--text-main);
-    box-shadow: 0 6px 16px rgba(255, 64, 17, 0.1);
-    transform: translateY(-1px);
-}}
-.language-toggle .language-option.active {{
-    border-color: var(--primary-red);
-    background: #fff4ef;
-    color: #c53114;
-    box-shadow: inset 0 0 0 1px rgba(255, 64, 17, 0.22);
-}}
-.language-toggle .language-option.disabled {{
-    cursor: not-allowed;
-    opacity: 0.82;
-}}
-.language-toggle img {{
-    width: 1.72rem;
-    height: 1.15rem;
-    flex: 0 0 auto;
-    border-radius: 3px;
-    object-fit: cover;
-    box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.16);
-}}
-.language-toggle .language-text {{
+[class*="st-key-lang_"] button p {{
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: 0.88rem;
+    font-weight: 700;
+}}
+[class*="st-key-lang_"] button::before {{
+    content: "";
+    width: 1.72rem;
+    height: 1.15rem;
+    margin-right: 0.5rem;
+    flex: 0 0 auto;
+    border-radius: 3px;
+    background-position: center;
+    background-size: cover;
+    box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.16);
+}}
+.st-key-lang_pt button::before {{
+    background-image: url("{FLAG_IMAGE_URIS['pt']}");
+}}
+.st-key-lang_en button::before {{
+    background-image: url("{FLAG_IMAGE_URIS['en']}");
+}}
+[class*="st-key-lang_"] button:hover:enabled {{
+    border-color: var(--primary-red) !important;
+    background: #fff7f4 !important;
+    box-shadow: 0 6px 16px rgba(255, 64, 17, 0.1) !important;
+    transform: translateY(-1px);
+}}
+[class*="st-key-lang_"] button[kind="primary"] {{
+    border-color: var(--primary-red) !important;
+    background: #fff4ef !important;
+    color: #c53114 !important;
+    box-shadow: inset 0 0 0 1px rgba(255, 64, 17, 0.22) !important;
 }}
 
 /* Buttons */
@@ -1081,15 +1098,10 @@ button[kind="secondary"]:hover {{
 }}
 
 /* Welcome Discover CTA */
-.welcome-discover-wrap {{
-    container-type: inline-size;
-    display: block;
-    width: 100%;
-}}
-.welcome-discover {{
+.st-key-welcome_discover {{
     position: relative;
     margin: 28px auto 18px;
-    padding: clamp(20px, 3cqi, 32px) clamp(22px, 3.5cqi, 40px);
+    padding: clamp(20px, 3vw, 32px) clamp(22px, 3.5vw, 40px);
     border-radius: 22px;
     background:
         radial-gradient(circle at 12% 18%, rgba(246, 218, 0, 0.32), transparent 55%),
@@ -1097,13 +1109,9 @@ button[kind="secondary"]:hover {{
         linear-gradient(135deg, #fff7d6 0%, #ffe6df 100%);
     border: 1px solid rgba(255, 64, 17, 0.18);
     box-shadow: 0 18px 38px -22px rgba(255, 64, 17, 0.45);
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: clamp(16px, 3cqi, 32px);
     overflow: hidden;
 }}
-.welcome-discover::before {{
+.st-key-welcome_discover::before {{
     content: "";
     position: absolute;
     top: -40px;
@@ -1128,66 +1136,55 @@ button[kind="secondary"]:hover {{
     border-radius: 999px;
     margin-bottom: 10px;
 }}
-.welcome-discover h3 {{
+.welcome-discover-title {{
     margin: 0 0 6px;
-    font-size: clamp(1.25rem, 4cqi, 1.65rem);
+    font-family: var(--font-display);
+    font-size: clamp(1.25rem, 2.6vw, 1.65rem);
     font-weight: 800;
     color: #1f2937;
     line-height: 1.25;
 }}
-.welcome-discover p {{
+.welcome-discover-text {{
     margin: 0;
     font-size: 0.97rem;
     color: #3a4252;
     line-height: 1.55;
     max-width: 56ch;
 }}
-.welcome-discover-cta {{
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
+.st-key-welcome_discover_cta button {{
     padding: 14px 24px;
-    border-radius: 14px;
-    background: linear-gradient(135deg, #ff4011 0%, #ff7e3d 100%);
+    border: none !important;
+    border-radius: 14px !important;
+    background: linear-gradient(135deg, #ff4011 0%, #ff7e3d 100%) !important;
     color: #fff !important;
+    box-shadow: 0 12px 26px -10px rgba(255, 64, 17, 0.6) !important;
+    white-space: nowrap;
+}}
+.st-key-welcome_discover_cta button p {{
     font-weight: 700;
     font-size: 1rem;
     letter-spacing: 0.01em;
-    text-decoration: none !important;
-    box-shadow: 0 12px 26px -10px rgba(255, 64, 17, 0.6);
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-    white-space: nowrap;
 }}
-.welcome-discover-cta:hover {{
+.st-key-welcome_discover_cta button::after {{
+    content: "\\2192";
+    margin-left: 10px;
+    font-weight: 800;
+}}
+.st-key-welcome_discover_cta button:hover {{
     transform: translateY(-2px);
-    box-shadow: 0 18px 32px -12px rgba(255, 64, 17, 0.7);
+    box-shadow: 0 18px 32px -12px rgba(255, 64, 17, 0.7) !important;
     color: #fff !important;
-}}
-.welcome-discover-cta svg {{
-    width: 18px;
-    height: 18px;
-}}
-@container (max-width: 620px) {{
-    .welcome-discover {{
-        grid-template-columns: 1fr;
-        text-align: left;
-    }}
-    .welcome-discover-cta {{
-        justify-self: start;
-    }}
 }}
 
 @media (max-width: 420px) {{
-    .language-toggle {{
-        gap: 0.45rem;
-    }}
-    .language-toggle a,
-    .language-toggle span.language-option {{
+    [class*="st-key-lang_"] button {{
         min-height: 2.55rem;
         padding: 0.4rem 0.42rem;
+    }}
+    [class*="st-key-lang_"] button p {{
         font-size: 0.82rem;
     }}
-    .language-toggle img {{
+    [class*="st-key-lang_"] button::before {{
         width: 1.45rem;
         height: 0.97rem;
     }}
@@ -1376,46 +1373,80 @@ st.set_page_config(
 )
 
 
-def normalized_value(value: Optional[str]) -> str:
-    """Normalize optional text values loaded from env or UI."""
-    if not isinstance(value, str):
-        return str(value).strip() if value is not None else ""
-    return value.strip()
+# Visitor model settings. Presets only fill the base URL field; any
+# OpenAI-compatible base URL typed by the visitor works.
+LLM_PRESETS: Dict[str, Dict[str, str]] = {
+    "openai": {"label": "OpenAI", "base_url": "https://api.openai.com/v1", "model_hint": "gpt-5.4-mini"},
+    "azure": {
+        "label": "Azure OpenAI",
+        "base_url": "",
+        "url_hint": "https://<resource>.openai.azure.com/openai/v1/",
+        "model_hint": "gpt-5.4-mini",
+    },
+    "gemini": {
+        "label": "Google Gemini",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "model_hint": "gemini-2.5-flash",
+    },
+    "openrouter": {"label": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "model_hint": "openai/gpt-5.4-mini"},
+    "lmstudio": {"label": "LM Studio (local)", "base_url": "http://localhost:1234/v1", "model_hint": "qwen/qwen3.5-9b"},
+    "other": {"label": "", "base_url": "", "url_hint": "https://", "model_hint": ""},
+}
+DEFAULT_LLM_PRESET = "openai"
+# Session key of an assistant built on the server provider from config.py.
+SERVER_LLM_KEY = "server"
 
 
-def runtime_provider_selector_enabled() -> bool:
-    """Return whether the sidebar should allow live provider switching."""
-    return bool(getattr(Config, "ENABLE_PROVIDER_SELECTOR", True))
+def visitor_llm_settings_enabled() -> bool:
+    """Return whether visitors may use their own model in the sidebar."""
+    return bool(Config.ALLOW_VISITOR_LLM_SETTINGS)
 
 
-def runtime_credential_inputs_enabled() -> bool:
-    """Return whether the sidebar should allow live credential editing."""
-    return bool(getattr(Config, "ENABLE_PROVIDER_CREDENTIAL_INPUTS", True))
+def llm_preset_options() -> List[str]:
+    """Return the presets this deployment can reach; local servers need private hosts."""
+    return [key for key in LLM_PRESETS if key != "lmstudio" or Config.ALLOW_PRIVATE_LLM_HOSTS]
 
 
-def runtime_settings_panel_visible() -> bool:
-    """Return whether the settings panel should be visible in the sidebar."""
-    return runtime_provider_selector_enabled() or runtime_credential_inputs_enabled()
+def session_llm_connection() -> Optional[LLMConnection]:
+    """Return the visitor's model connection for this session, if any."""
+    if not visitor_llm_settings_enabled():
+        return None
+    return st.session_state.get("llm_connection")
 
 
-def runtime_auto_initialize_enabled() -> bool:
-    """Return whether the app should auto-initialize the assistant on startup."""
-    return not runtime_settings_panel_visible()
+def session_llm_ready() -> bool:
+    """Return whether this session has a model it can build the assistant with."""
+    return session_llm_connection() is not None or LLMFactory.server_provider_configured()
 
 
-def provider_configuration_hint(language: str) -> str:
-    """Explain where credentials should be configured for the active runtime."""
-    if runtime_credential_inputs_enabled():
-        return (
-            "Configure-o nas definições laterais."
-            if language == "pt"
-            else "Configure it in the sidebar."
-        )
-    return (
-        "Configure-o nas variáveis de ambiente ou nos Streamlit secrets."
-        if language == "pt"
-        else "Configure it in environment variables or Streamlit secrets."
+def session_llm_key() -> str:
+    """Return a non-reversible key of the model this session should use."""
+    connection = session_llm_connection()
+    return connection.fingerprint if connection is not None else SERVER_LLM_KEY
+
+
+def assistant_ready_for_session() -> bool:
+    """Return whether the session assistant exists and uses the session model."""
+    return bool(
+        st.session_state.get("initialized")
+        and st.session_state.get("assistant") is not None
+        and st.session_state.get("assistant_llm_key") == session_llm_key()
     )
+
+
+def llm_setup_message() -> str:
+    """Explain where to configure a model when none is available."""
+    if visitor_llm_settings_enabled():
+        return t("llm_setup_prompt")
+    return t("llm_server_setup_prompt")
+
+
+def redact_session_secret(text: str) -> str:
+    """Remove the visitor's key from text bound for logs."""
+    connection = session_llm_connection()
+    if connection is not None and connection.api_key:
+        return text.replace(connection.api_key, "[REDACTED]")
+    return text
 
 
 def init_system_state():
@@ -1423,37 +1454,17 @@ def init_system_state():
     defaults = {
         "messages": [],
         "assistant": None,
-        "provider": Config.MODEL_PROVIDER,
-        "last_provider": Config.MODEL_PROVIDER,
+        "assistant_llm_key": None,
+        "llm_connection": None,
+        "llm_notice": None,
         "language": "pt",
         "initialized": False,
-        "error": None,
         "current_page": "chat",
-        "credentials": {
-            "openai": {"api_key": normalized_value(os.getenv("OPENAI_API_KEY", ""))},
-            "azure": {
-                "api_key": normalized_value(os.getenv("AZURE_OPENAI_API_KEY", "")),
-                "endpoint": normalized_value(os.getenv("AZURE_OPENAI_ENDPOINT", "")),
-                "model": normalized_value(os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", ""))
-                or normalized_value(Config.AZURE_OPENAI_DEPLOYMENT_NAME)
-                    or normalized_value(Config.DEFAULT_GPT_MODEL_NAME),
-            },
-            "lmstudio": {
-                "base_url": normalized_value(Config.LMSTUDIO_BASE_URL),
-                "model": normalized_value(Config.LMSTUDIO_MODEL_NAME),
-            },
-        },
-        "ui_api_key_values": {
-            "openai": "",
-            "azure_api_key": "",
-            "azure_endpoint": "",
-            "azure_model": "",
-        },
         "startup_resources_attempted": False,
         "startup_resources_ok": None,
         "startup_resources_status": {},
         "transport_db_status": None,
-        "startup_auto_init_attempted_provider": None,
+        "startup_auto_init_attempted_key": None,
         "startup_auto_init_error": None,
         "startup_auto_init_in_progress": False,
         "request_running": False,
@@ -1487,11 +1498,20 @@ def sync_page_from_query_params() -> None:
         st.session_state.language = language_value
 
 
-def build_sidebar_url(page: str, language: str) -> str:
-    """Build a same-tab sidebar URL preserving page and language."""
-    safe_page = page if page in {"chat", "info"} else "chat"
+def set_language(language: str) -> None:
+    """Switch the UI language within the current session.
+
+    A link would load a new page and start a new session, losing the
+    conversation and any visitor model settings; a widget callback keeps them.
+    """
     safe_language = language if language in LANGUAGE_OPTIONS else "pt"
-    return f"?page={safe_page}&lang={safe_language}"
+    st.session_state.language = safe_language
+    st.query_params["lang"] = safe_language
+    # The browser keeps a selectbox value as its displayed label. Setting the
+    # value again makes Streamlit send the label in the new language;
+    # otherwise the next rerun returns the old label ("Outro"), not an option.
+    if "llm_preset" in st.session_state:
+        st.session_state.llm_preset = st.session_state.llm_preset
 
 
 def set_navigation_query_params(page: str) -> None:
@@ -1506,48 +1526,23 @@ def set_navigation_query_params(page: str) -> None:
 
 
 def render_language_selector(request_locked: bool) -> None:
-    """Render a responsive language selector with stable ellipsis behaviour."""
+    """Render the language buttons; flags come from CSS (``st-key-lang_*``)."""
     current_language = st.session_state.get("language", "pt")
-    current_page = st.session_state.get("current_page", "chat")
-
-    items = []
-    for language_key, option in LANGUAGE_OPTIONS.items():
-        is_active = language_key == current_language
-        css_classes = ["language-option"]
-        if is_active:
-            css_classes.append("active")
-        if request_locked:
-            css_classes.append("disabled")
-
-        label = html.escape(option["label"])
-        short_label = html.escape(option["short"])
-        image_uri = html.escape(FLAG_IMAGE_URIS[language_key], quote=True)
-        content = (
-            f'<img src="{image_uri}" alt="{short_label} flag" loading="lazy" />'
-            f'<span class="language-text">{label}</span>'
-        )
-
-        class_attr = " ".join(css_classes)
-        if request_locked:
-            items.append(f'<span class="{class_attr}" aria-disabled="true">{content}</span>')
-            continue
-
-        href = html.escape(build_sidebar_url(current_page, language_key), quote=True)
-        aria_current = ' aria-current="true"' if is_active else ""
-        items.append(
-            f'<a class="{class_attr}" href="{href}" target="_self"{aria_current}>{content}</a>'
-        )
-
-    selector_label = html.escape(t("language"))
     st.markdown(
-        f"""
-        <p class="language-selector-label">{selector_label}</p>
-        <div class="language-toggle" role="group" aria-label="{selector_label}">
-            {''.join(items)}
-        </div>
-        """,
+        f'<p class="language-selector-label">{html.escape(t("language"))}</p>',
         unsafe_allow_html=True,
     )
+    columns = st.columns(len(LANGUAGE_OPTIONS))
+    for column, (language_key, option) in zip(columns, LANGUAGE_OPTIONS.items()):
+        column.button(
+            option["label"],
+            key=f"lang_{language_key}",
+            type="primary" if language_key == current_language else "secondary",
+            use_container_width=True,
+            disabled=request_locked,
+            on_click=set_language,
+            args=(language_key,),
+        )
 
 
 def _localized_kb_status(kb_ok: bool, language: str) -> str:
@@ -1571,21 +1566,18 @@ def _localize_startup_status(status: Dict[str, Any], language: str) -> Dict[str,
     return localized_status
 
 
-@st.cache_resource(
-    show_spinner=False,
-    ttl=Config.STREAMLIT_RESOURCE_CACHE_TTL_SECONDS,
-)
+@st.cache_resource(show_spinner=False)
 def _load_shared_startup_resources() -> Dict[str, Any]:
     """Load shared runtime resources once per Streamlit server process.
 
     This intentionally caches only process-wide resources such as the vector
-    store embeddings and generated transport databases. The conversational
+    store embeddings and generated transport databases: on a fresh hosted
+    container it downloads the vector DB and transport release assets into the
+    writable runtime directory. Hosted deployments then refresh that data in
+    the background (``schedule_runtime_data_refresh``). The conversational
     assistant remains in ``st.session_state`` because it is user/session scoped.
     """
-    return _run_startup_preload_impl(
-        language="en",
-        force_refresh=Config.STREAMLIT_RESOURCE_CACHE_TTL_SECONDS is not None,
-    )
+    return _run_startup_preload_impl(language="en")
 
 
 def _run_startup_preload(language: str = "pt") -> Dict[str, Any]:
@@ -1628,185 +1620,22 @@ def ensure_startup_resources(
     return _load()
 
 
-def set_credentials_env(provider: str) -> None:
-    """Apply stored credentials to environment variables and runtime config."""
-    creds = st.session_state.credentials
-    Config.MODEL_PROVIDER = provider
+def initialize_assistant(show_spinner: bool = True) -> Tuple[bool, Optional[str]]:
+    """Build the session assistant with the model this session should use.
 
-    openai_key = normalized_value(creds["openai"].get("api_key"))
-    azure_key = normalized_value(creds["azure"].get("api_key"))
-    azure_endpoint = normalized_value(creds["azure"].get("endpoint"))
-    azure_model = normalized_value(creds["azure"].get("model")) or normalized_value(
-        Config.AZURE_OPENAI_DEPLOYMENT_NAME
-    ) or normalized_value(Config.DEFAULT_GPT_MODEL_NAME)
-    lmstudio_url = normalized_value(creds["lmstudio"].get("base_url"))
-    lmstudio_model = normalized_value(creds["lmstudio"].get("model"))
+    Args:
+        show_spinner: Whether to show a spinner while the agents are built.
 
-    if provider == "openai" and openai_key:
-        os.environ["OPENAI_API_KEY"] = openai_key
-        Config.OPENAI_API_KEY = openai_key
-    elif provider == "azure" and azure_key:
-        os.environ["AZURE_OPENAI_API_KEY"] = azure_key
-        os.environ["AZURE_OPENAI_ENDPOINT"] = azure_endpoint
-        os.environ["AZURE_OPENAI_DEPLOYMENT_NAME"] = azure_model
-        Config.AZURE_OPENAI_API_KEY = azure_key
-        Config.AZURE_OPENAI_ENDPOINT = azure_endpoint
-        Config.AZURE_OPENAI_DEPLOYMENT_NAME = azure_model
-    elif provider == "lmstudio":
-        Config.LMSTUDIO_BASE_URL = lmstudio_url
-        Config.LMSTUDIO_MODEL_NAME = lmstudio_model
-
-
-def provider_has_required_credentials(provider: str) -> Tuple[bool, Optional[str]]:
-    """Validate the minimum credential set needed for the selected provider."""
+    Returns:
+        Tuple[bool, Optional[str]]: Success flag and a localized error message.
+    """
     lang = st.session_state.get("language", "pt")
-    creds = st.session_state.credentials
-    openai_key = normalized_value(creds["openai"].get("api_key"))
-    azure_key = normalized_value(creds["azure"].get("api_key"))
-    azure_endpoint = normalized_value(creds["azure"].get("endpoint"))
-    azure_model = normalized_value(creds["azure"].get("model")) or normalized_value(
-        Config.AZURE_OPENAI_DEPLOYMENT_NAME
-    ) or normalized_value(Config.DEFAULT_GPT_MODEL_NAME)
-    lmstudio_url = normalized_value(st.session_state.credentials["lmstudio"].get("base_url"))
-    lmstudio_model = normalized_value(st.session_state.credentials["lmstudio"].get("model"))
-
-    if provider == "openai" and not openai_key:
-        return (
-            False,
-            f"Falta a chave da API OpenAI. {provider_configuration_hint(lang)}"
-            if lang == "pt"
-            else f"Missing OpenAI API key. {provider_configuration_hint(lang)}",
-        )
-
-    if provider == "azure":
-        missing = []
-        if not azure_key:
-            missing.append("API Key")
-        if not azure_endpoint:
-            missing.append("Endpoint")
-        if not azure_model:
-            missing.append("Deployment Name")
-        if missing:
-            missing_str = ", ".join(missing)
-            return (
-                False,
-                f"Faltam credenciais Azure OpenAI: {missing_str}."
-                if lang == "pt"
-                else f"Missing Azure OpenAI credentials: {missing_str}.",
-            )
-
-    if provider == "lmstudio":
-        if not lmstudio_url:
-            return (
-                False,
-                "Falta o URL do servidor LM Studio."
-                if lang == "pt"
-                else "Missing LM Studio server URL.",
-            )
-        if not lmstudio_model:
-            return (
-                False,
-                "Falta o nome do modelo LM Studio."
-                if lang == "pt"
-                else "Missing LM Studio model name.",
-            )
-
-    return True, None
-
-
-def sanitize_backend_error(raw_error: str) -> str:
-    """Redact obvious secrets and endpoints from backend error messages."""
-    sanitized = re.sub(r"https?://[^\s'\"]+", "[URL_REDACTED]", raw_error)
-    sanitized = re.sub(r"(sk-[A-Za-z0-9]{6})[A-Za-z0-9_-]+", r"\1...[REDACTED]", sanitized)
-    return re.sub(r"(Bearer\s+)[^\s'\"]+", r"\1[REDACTED]", sanitized)
-
-
-def test_assistant_connection(provider: str) -> Tuple[bool, Optional[str]]:
-    """Run a minimal inference request to confirm the selected model is ready."""
-    lang = st.session_state.get("language", "pt")
-    placeholder = st.empty()
-    from agent.utils.model_connection_probe import perform_raw_model_connection_probe
-
-    test_llm = st.session_state.assistant.supervisor.llm
-    model_display = st.session_state.assistant.model_name
-
-    placeholder.info(
-        f"🔄 A testar o modelo {model_display}..."
-        if lang == "pt"
-        else f"🔄 Testing model {model_display}..."
-    )
-
-    try:
-        perform_raw_model_connection_probe(
-            test_llm=test_llm,
-            provider=provider,
-            model_display=model_display,
-        )
-
-        placeholder.success(
-            f"✅ Modelo pronto! ({model_display})"
-            if lang == "pt"
-            else f"✅ Model ready! ({model_display})"
-        )
-        placeholder.empty()
-        return True, None
-    except Exception as exc:
-        placeholder.empty()
-        sanitized_error = sanitize_backend_error(str(exc))
-
-        if provider == "lmstudio":
-            fixes = (
-                "- Confirme que o LM Studio está aberto e com o servidor ativo\n"
-                "- Verifique se o modelo selecionado está carregado\n"
-                "- Confirme o URL e a porta do servidor local"
-                if lang == "pt"
-                else "- Make sure LM Studio is open and its local server is running\n"
-                "- Confirm the selected model is fully loaded\n"
-                "- Verify the server URL and port"
-            )
-        elif provider == "azure":
-            fixes = (
-                "- Verifique a API key, o endpoint e o deployment\n"
-                "- Confirme que o deployment existe e está disponível\n"
-                "- Valide quotas e permissões da subscrição"
-                if lang == "pt"
-                else "- Verify the API key, endpoint, and deployment\n"
-                "- Confirm the deployment exists and is available\n"
-                "- Validate subscription quotas and permissions"
-            )
-        else:
-            fixes = (
-                "- Verifique a API key\n- Confirme que o modelo está disponível\n- Valide a conectividade à Internet"
-                if lang == "pt"
-                else "- Verify the API key\n- Confirm the model is available\n- Check internet connectivity"
-            )
-
-        message = (
-            "Não foi possível validar a ligação ao modelo.\n\n"
-            f"{fixes}\n\nDetalhe técnico: {sanitized_error}"
-            if lang == "pt"
-            else "Could not validate the connection to the selected model.\n\n"
-            f"{fixes}\n\nTechnical detail: {sanitized_error}"
-        )
-        return False, message
-
-
-def initialize_assistant(
-    provider: str,
-    run_connection_probe: bool = True,
-    show_spinner: bool = True,
-) -> Tuple[bool, Optional[str]]:
-    """Initialise the assistant securely and only when needed."""
-    lang = st.session_state.get("language", "pt")
-    credentials_ok, credentials_error = provider_has_required_credentials(provider)
-    if not credentials_ok:
+    if not session_llm_ready():
         st.session_state.initialized = False
-        return False, credentials_error
+        return False, llm_setup_message()
 
     try:
         from agent.graph import MultiAgentAssistant
-
-        set_credentials_env(provider)
 
         startup_ok, startup_status = ensure_startup_resources(
             show_spinner=False,
@@ -1840,27 +1669,21 @@ def initialize_assistant(
         )
         if show_spinner:
             with st.spinner(init_message):
-                st.session_state.assistant = MultiAgentAssistant()
+                assistant = MultiAgentAssistant(connection=session_llm_connection())
         else:
-            st.session_state.assistant = MultiAgentAssistant()
+            assistant = MultiAgentAssistant(connection=session_llm_connection())
 
-        if run_connection_probe:
-            connection_ok, connection_error = test_assistant_connection(provider)
-            if not connection_ok:
-                st.session_state.assistant = None
-                st.session_state.initialized = False
-                return False, connection_error
-
+        st.session_state.assistant = assistant
+        st.session_state.assistant_llm_key = session_llm_key()
         st.session_state.initialized = True
-        st.session_state.provider = provider
-        st.session_state.error = None
-
         return True, None
-    except Exception as exc:
-        logging.getLogger(__name__).exception("Assistant initialization failed")
+    except Exception:
+        logging.getLogger(__name__).error(
+            "Assistant initialization failed:\n%s",
+            redact_session_secret(traceback.format_exc()),
+        )
         st.session_state.assistant = None
         st.session_state.initialized = False
-        st.session_state.error = sanitize_backend_error(str(exc))
         return (
             False,
             "Não foi possível iniciar o assistente."
@@ -1889,6 +1712,118 @@ def display_banner():
     """,
         unsafe_allow_html=True,
     )
+
+
+def _apply_llm_preset() -> None:
+    """Fill the base URL field with the selected preset."""
+    st.session_state.llm_base_url = LLM_PRESETS[st.session_state.llm_preset]["base_url"]
+
+
+def activate_llm_connection(connection: Optional[LLMConnection]) -> None:
+    """Use a model for this session's next messages, keeping the conversation.
+
+    Args:
+        connection: Visitor connection, or None for the server default.
+    """
+    st.session_state.llm_connection = connection
+    assistant = st.session_state.get("assistant")
+    if assistant is not None:
+        assistant.set_llm_connection(connection)
+        st.session_state.assistant_llm_key = session_llm_key()
+
+
+def save_llm_settings() -> None:
+    """Validate and test the visitor's model, then use it for this session."""
+    try:
+        connection = LLMConnection.create(
+            base_url=st.session_state.get("llm_base_url", ""),
+            model=st.session_state.get("llm_model", ""),
+            api_key=st.session_state.get("llm_api_key", ""),
+        )
+    except ValueError as exc:
+        st.session_state.llm_notice = ("error", f"llm_error_{exc}", {})
+        return
+
+    with st.spinner(t("llm_checking")):
+        failure = check_tool_calling(connection)
+    if failure:
+        st.session_state.llm_notice = ("error", f"llm_error_{failure}", {})
+        return
+
+    activate_llm_connection(connection)
+    st.session_state.llm_notice = ("success", "llm_check_ok", {"model": connection.model})
+
+
+def render_llm_settings(request_locked: bool) -> None:
+    """Render the visitor's model settings for this browser session.
+
+    Args:
+        request_locked: Whether a request is running and inputs are disabled.
+    """
+    connection = session_llm_connection()
+    server_ready = LLMFactory.server_provider_configured()
+    if "llm_preset" not in st.session_state:
+        st.session_state.llm_preset = DEFAULT_LLM_PRESET
+        st.session_state.llm_base_url = LLM_PRESETS[DEFAULT_LLM_PRESET]["base_url"]
+
+    with st.expander("⚙️ " + t("settings"), expanded=not session_llm_ready()):
+        if connection is not None:
+            host = urlsplit(connection.base_url).hostname
+            st.caption(t("llm_active_custom").format(model=connection.model, host=host))
+        elif server_ready:
+            st.caption(t("llm_active_server"))
+        else:
+            st.warning(t("llm_server_unavailable"))
+
+        st.selectbox(
+            t("llm_preset"),
+            options=llm_preset_options(),
+            format_func=lambda key: LLM_PRESETS[key]["label"] or t("llm_preset_other"),
+            key="llm_preset",
+            on_change=_apply_llm_preset,
+            disabled=request_locked,
+        )
+        preset = LLM_PRESETS[st.session_state.llm_preset]
+        st.text_input(
+            t("llm_base_url"),
+            key="llm_base_url",
+            placeholder=preset.get("url_hint", preset["base_url"]),
+            disabled=request_locked,
+        )
+        st.text_input(t("llm_api_key"), key="llm_api_key", type="password", disabled=request_locked)
+        st.text_input(
+            t("llm_model"),
+            key="llm_model",
+            placeholder=preset["model_hint"],
+            help=t("llm_model_help"),
+            disabled=request_locked,
+        )
+        st.caption(t("llm_key_privacy"))
+
+        if st.button(
+            t("llm_save"),
+            use_container_width=True,
+            type="primary",
+            key="llm_save_button",
+            disabled=request_locked,
+        ):
+            save_llm_settings()
+            st.rerun()
+        if connection is not None and server_ready and st.button(
+            t("llm_use_default"),
+            use_container_width=True,
+            key="llm_default_button",
+            disabled=request_locked,
+        ):
+            activate_llm_connection(None)
+            st.session_state.llm_notice = ("success", "llm_default_restored", {})
+            st.rerun()
+
+        notice = st.session_state.get("llm_notice")
+        if notice:
+            kind, message_key, params = notice
+            show_notice = st.success if kind == "success" else st.error
+            show_notice(t(message_key).format(**params))
 
 
 def build_sidebar():
@@ -1930,178 +1865,9 @@ def build_sidebar():
 
         render_language_selector(request_locked=request_locked)
 
-        provider_labels = {
-            "openai": "OpenAI",
-            "azure": "Azure OpenAI",
-            "lmstudio": "LM Studio",
-        }
-        manual_connect_visible = runtime_settings_panel_visible()
-        locked_provider = Config.MODEL_PROVIDER
-        if not runtime_provider_selector_enabled():
-            st.session_state.provider = locked_provider
-            st.session_state.last_provider = locked_provider
-            selected_provider = locked_provider
-        else:
-            selected_provider = st.session_state.provider
-
-        if manual_connect_visible:
+        if visitor_llm_settings_enabled():
             st.divider()
-
-            with st.expander(
-                "⚙️ " + t("settings"), expanded=False
-            ):
-                if runtime_provider_selector_enabled():
-                    selected_provider = st.selectbox(
-                        t("select_provider"),
-                        options=list(provider_labels.keys()),
-                        format_func=lambda key: provider_labels[key],
-                        index=list(provider_labels.keys()).index(st.session_state.provider),
-                    )
-
-                credentials_changed = False
-                if runtime_credential_inputs_enabled() and selected_provider == "openai":
-                    if st.session_state.credentials["openai"].get("api_key"):
-                        st.caption(
-                            "🔐 Chave OpenAI detetada no ambiente. O valor nunca é mostrado."
-                            if st.session_state.language == "pt"
-                            else "🔐 OpenAI key detected in the environment. The value is never shown."
-                        )
-
-                    ui_value = st.session_state.ui_api_key_values.get("openai", "")
-                    new_value = st.text_input(
-                        "OpenAI API Key",
-                        value=ui_value,
-                        type="password",
-                        placeholder=t("api_key_placeholder"),
-                    )
-                    if new_value != ui_value:
-                        st.session_state.ui_api_key_values["openai"] = new_value
-                        st.session_state.credentials["openai"]["api_key"] = new_value
-                        credentials_changed = True
-
-                elif runtime_credential_inputs_enabled() and selected_provider == "azure":
-                    configured_items = []
-                    if st.session_state.credentials["azure"].get("api_key"):
-                        configured_items.append("API Key")
-                    if st.session_state.credentials["azure"].get("endpoint"):
-                        configured_items.append("Endpoint")
-                    effective_azure_model = (
-                        normalized_value(st.session_state.credentials["azure"].get("model"))
-                        or normalized_value(Config.AZURE_OPENAI_DEPLOYMENT_NAME)
-                        or normalized_value(Config.DEFAULT_GPT_MODEL_NAME)
-                    )
-                    if effective_azure_model:
-                        configured_items.append("Deployment")
-                    if configured_items:
-                        configured_text = ", ".join(configured_items)
-                        st.caption(
-                            f"🔐 Configurado no ambiente: {configured_text}. Os valores nunca são mostrados."
-                            if st.session_state.language == "pt"
-                            else f"🔐 Configured in the environment: {configured_text}. Values are never shown."
-                        )
-
-                    ui_key = st.session_state.ui_api_key_values.get("azure_api_key", "")
-                    ui_endpoint = st.session_state.ui_api_key_values.get("azure_endpoint", "")
-                    ui_model = st.session_state.ui_api_key_values.get("azure_model", "")
-
-                    new_key = st.text_input(
-                        "Azure API Key",
-                        value=ui_key,
-                        type="password",
-                        placeholder="Insira a chave Azure OpenAI..."
-                        if st.session_state.language == "pt"
-                        else "Enter your Azure OpenAI key...",
-                    )
-                    new_endpoint = st.text_input(
-                        "Azure Endpoint",
-                        value=ui_endpoint,
-                        placeholder="https://your-resource.openai.azure.com",
-                    )
-                    new_model = st.text_input(
-                        "Deployment Name",
-                        value=ui_model,
-                        placeholder=effective_azure_model,
-                    )
-
-                    if new_key != ui_key:
-                        st.session_state.ui_api_key_values["azure_api_key"] = new_key
-                        st.session_state.credentials["azure"]["api_key"] = new_key
-                        credentials_changed = True
-                    if new_endpoint != ui_endpoint:
-                        st.session_state.ui_api_key_values["azure_endpoint"] = new_endpoint
-                        st.session_state.credentials["azure"]["endpoint"] = new_endpoint
-                        credentials_changed = True
-                    if new_model != ui_model:
-                        st.session_state.ui_api_key_values["azure_model"] = new_model
-                        st.session_state.credentials["azure"]["model"] = new_model
-                        credentials_changed = True
-
-                elif runtime_credential_inputs_enabled():
-                    current_base_url = st.session_state.credentials["lmstudio"].get(
-                        "base_url", Config.LMSTUDIO_BASE_URL
-                    )
-                    current_model = st.session_state.credentials["lmstudio"].get(
-                        "model", Config.LMSTUDIO_MODEL_NAME
-                    )
-                    new_base_url = st.text_input(
-                        t("local_url"),
-                        value=current_base_url,
-                        placeholder=t("local_url_placeholder"),
-                    )
-                    new_model = st.text_input(
-                        t("model_name"),
-                        value=current_model,
-                        placeholder=Config.LMSTUDIO_MODEL_NAME,
-                    )
-                    if new_base_url != current_base_url:
-                        st.session_state.credentials["lmstudio"]["base_url"] = new_base_url
-                        credentials_changed = True
-                    if new_model != current_model:
-                        st.session_state.credentials["lmstudio"]["model"] = new_model
-                        credentials_changed = True
-
-                if manual_connect_visible and st.button(
-                    t("save_credentials"),
-                    use_container_width=True,
-                    type="primary",
-                    key="connect_system_button",
-                    disabled=request_locked,
-                ):
-                    with st.spinner(
-                        "🔌 A ligar o assistente ao motor de IA..."
-                        if st.session_state.language == "pt"
-                        else "🔌 Connecting assistant to AI engine..."
-                    ):
-                        success, error = initialize_assistant(selected_provider)
-                    if success:
-                        st.session_state.startup_auto_init_attempted_provider = selected_provider
-                        st.session_state.startup_auto_init_error = None
-                        st.success(t("assistant_ready"))
-                        st.rerun()
-                    else:
-                        st.session_state.startup_auto_init_attempted_provider = selected_provider
-                        st.session_state.startup_auto_init_error = error or t("initialization_failed")
-                        st.error(error or t("initialization_failed"))
-                elif (
-                    manual_connect_visible
-                    and st.session_state.initialized
-                    and st.session_state.provider == selected_provider
-                    and not credentials_changed
-                ):
-                    st.success(t("assistant_ready"))
-                else:
-                    provider_ready, provider_msg = provider_has_required_credentials(
-                        selected_provider
-                    )
-                    if provider_ready and manual_connect_visible:
-                        st.info(
-                            "Credenciais prontas. Clique em **Ligar Sistema** para iniciar."
-                            if st.session_state.language == "pt"
-                            else "Credentials are ready. Click **Connect System** to start."
-                        )
-                    elif provider_msg:
-                        st.caption(provider_msg)
-
+            render_llm_settings(request_locked)
             st.divider()
 
         # Quick Actions
@@ -2131,10 +1897,9 @@ def build_sidebar():
         with col_s1:
             st.metric(t("messages"), count_user_interactions(st.session_state.messages))
         with col_s2:
-            provider_ready, _ = provider_has_required_credentials(selected_provider)
-            if st.session_state.initialized and st.session_state.provider == selected_provider:
+            if assistant_ready_for_session():
                 st.metric(t("status"), "🟢")
-            elif provider_ready:
+            elif session_llm_ready():
                 st.metric(t("status"), "🟡")
             else:
                 st.metric(t("status"), "⚪")
@@ -2167,14 +1932,8 @@ def build_sidebar():
             unsafe_allow_html=True,
         )
 
-        return selected_provider, None
-
 
 def build_welcome():
-    info_href = html.escape(
-        build_sidebar_url("info", st.session_state.get("language", "pt")),
-        quote=True,
-    )
     st.markdown(
         f"<h2 style='text-align: center; margin-bottom: 10px;'>{t('welcome_title')}</h2>",
         unsafe_allow_html=True,
@@ -2184,27 +1943,22 @@ def build_welcome():
         unsafe_allow_html=True,
     )
 
-    st.markdown(
-        f"""
-        <div class="welcome-discover-wrap">
-            <div class="welcome-discover">
-                <div>
-                    <span class="welcome-discover-eyebrow">✨ {t('discover_eyebrow')}</span>
-                    <h3>{t('discover_title')}</h3>
-                    <p>{t('discover_subtitle')}</p>
-                </div>
-                <a class="welcome-discover-cta" href="{info_href}" target="_self" rel="noopener">
-                    <span>ℹ️ {t('discover_cta')}</span>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <line x1="5" y1="12" x2="19" y2="12"/>
-                        <polyline points="13 6 19 12 13 18"/>
-                    </svg>
-                </a>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    # A button, not a link: a link would start a new session (see set_language).
+    with st.container(key="welcome_discover"):
+        st.markdown(
+            f"""
+            <span class="welcome-discover-eyebrow">✨ {t('discover_eyebrow')}</span>
+            <div class="welcome-discover-title">{t('discover_title')}</div>
+            <p class="welcome-discover-text">{t('discover_subtitle')}</p>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.button(
+            f"ℹ️ {t('discover_cta')}",
+            key="welcome_discover_cta",
+            on_click=set_navigation_query_params,
+            args=("info",),
+        )
 
     st.markdown(
         f"""
@@ -2440,31 +2194,32 @@ def startup_gate_allows_requests(
 
 def should_attempt_startup_auto_initialization(
     *,
-    initialized: bool,
-    current_provider: str,
-    selected_provider: str,
-    credentials_ready: bool,
-    attempted_provider: Optional[str],
+    llm_ready: bool,
+    assistant_ready: bool,
+    session_key: str,
+    attempted_key: Optional[str],
     last_error: Optional[str],
 ) -> bool:
     """Return whether the startup flow should auto-initialize the assistant."""
-    if not runtime_auto_initialize_enabled() or not credentials_ready:
+    if not llm_ready or assistant_ready:
         return False
-    if initialized and current_provider == selected_provider:
-        return False
-    if attempted_provider == selected_provider and last_error:
+    if attempted_key == session_key and last_error:
         return False
     return True
 
 
-def selected_provider_from_runtime_state() -> str:
-    """Return the provider that will be selected before rendering the sidebar."""
-    if not runtime_provider_selector_enabled():
-        return Config.MODEL_PROVIDER
-    return str(st.session_state.get("provider") or Config.MODEL_PROVIDER)
+def startup_auto_initialization_due() -> bool:
+    """Return whether this session's assistant should be built at startup."""
+    return should_attempt_startup_auto_initialization(
+        llm_ready=session_llm_ready(),
+        assistant_ready=assistant_ready_for_session(),
+        session_key=session_llm_key(),
+        attempted_key=st.session_state.get("startup_auto_init_attempted_key"),
+        last_error=st.session_state.get("startup_auto_init_error"),
+    )
 
 
-def should_lock_for_startup_auto_initialization(selected_provider: str) -> bool:
+def should_lock_for_startup_auto_initialization() -> bool:
     """Return whether input controls should be locked for startup auto-init."""
     if st.session_state.get("current_page") != "chat":
         return False
@@ -2472,35 +2227,17 @@ def should_lock_for_startup_auto_initialization(selected_provider: str) -> bool:
         return False
     if st.session_state.get("request_running"):
         return True
-
-    credentials_ready, _ = provider_has_required_credentials(selected_provider)
-    return should_attempt_startup_auto_initialization(
-        initialized=bool(st.session_state.get("initialized", False)),
-        current_provider=str(st.session_state.get("provider") or ""),
-        selected_provider=selected_provider,
-        credentials_ready=credentials_ready,
-        attempted_provider=st.session_state.get("startup_auto_init_attempted_provider"),
-        last_error=st.session_state.get("startup_auto_init_error"),
-    )
+    return startup_auto_initialization_due()
 
 
-def attempt_startup_auto_initialization(selected_provider: str) -> bool:
-    """Initialize the assistant automatically when production credentials are ready.
+def attempt_startup_auto_initialization() -> bool:
+    """Initialize the assistant automatically when the session model is ready.
 
     Returns:
         True when initialization was attempted and the app requested a rerun.
         False when no startup initialization is needed.
     """
-    credentials_ready, _ = provider_has_required_credentials(selected_provider)
-    should_initialize = should_attempt_startup_auto_initialization(
-        initialized=bool(st.session_state.get("initialized", False)),
-        current_provider=str(st.session_state.get("provider") or ""),
-        selected_provider=selected_provider,
-        credentials_ready=credentials_ready,
-        attempted_provider=st.session_state.get("startup_auto_init_attempted_provider"),
-        last_error=st.session_state.get("startup_auto_init_error"),
-    )
-    if not should_initialize:
+    if not startup_auto_initialization_due():
         st.session_state.startup_auto_init_in_progress = False
         return False
 
@@ -2513,15 +2250,12 @@ def attempt_startup_auto_initialization(selected_provider: str) -> bool:
     )
     try:
         with st.spinner(spinner_text):
-            success, error = initialize_assistant(
-                selected_provider,
-                run_connection_probe=False,
-            )
+            success, error = initialize_assistant(show_spinner=False)
     finally:
         st.session_state.request_running = False
         st.session_state.startup_auto_init_in_progress = False
 
-    st.session_state.startup_auto_init_attempted_provider = selected_provider
+    st.session_state.startup_auto_init_attempted_key = session_llm_key()
     if success:
         st.session_state.startup_auto_init_error = None
     else:
@@ -2577,35 +2311,44 @@ def request_capture_locked(
 
 
 def build_user_error_message(error: Exception) -> str:
-    """Convert backend exceptions into safe, user-friendly messages."""
+    """Convert backend exceptions into safe, user-friendly messages.
+
+    When the session uses the server default model and visitors may bring
+    their own, persistent failures also point to the sidebar settings.
+    """
     lang = st.session_state.get("language", "pt")
     error_str = str(error).lower()
 
     if "401" in error_str or "unauthorized" in error_str:
-        return (
+        message = (
             "Falha de autenticação. Verifique a configuração da chave e do fornecedor."
             if lang == "pt"
             else "Authentication failed. Check the API key and provider settings."
         )
-    if "rate" in error_str or "limit" in error_str:
+    elif "rate" in error_str or "limit" in error_str:
         return (
             "O limite de pedidos foi atingido. Aguarde um momento e tente novamente."
             if lang == "pt"
             else "The request limit was reached. Please wait a moment and try again."
         )
-    if "content_filter" in error_str or "responsibleaipolicyviolation" in error_str:
+    elif "content_filter" in error_str or "responsibleaipolicyviolation" in error_str:
         return (
             "O fornecedor bloqueou temporariamente este pedido. Reformule a pergunta e tente novamente."
             if lang == "pt"
             else "The provider temporarily blocked this request. Please rephrase it and try again."
         )
-    if "timeout" in error_str or "connection" in error_str:
-        return (
+    elif "timeout" in error_str or "connection" in error_str:
+        message = (
             "Não foi possível contactar o fornecedor do modelo. Verifique a ligação ou o servidor local."
             if lang == "pt"
             else "Could not reach the selected model provider. Check your connection or local server."
         )
-    return t("error_generic")
+    else:
+        message = t("error_generic")
+
+    if visitor_llm_settings_enabled() and session_llm_connection() is None:
+        message = f"{message} {t('llm_switch_hint')}"
+    return message
 
 
 def _progress_key(text: str) -> str:
@@ -2675,7 +2418,6 @@ def write_progress_step(
 def run_interaction(
     user_input: str,
     user_message_already_rendered: bool = False,
-    selected_provider: Optional[str] = None,
 ) -> bool:
     """Run one chat turn and optionally initialise inside the assistant bubble."""
     if not user_message_already_rendered:
@@ -2683,14 +2425,7 @@ def run_interaction(
         with st.chat_message("user"):
             st.markdown(user_input)
 
-    provider_to_use = selected_provider or str(
-        st.session_state.get("provider") or Config.MODEL_PROVIDER
-    )
-    needs_initialization = (
-        not st.session_state.initialized
-        or st.session_state.provider != provider_to_use
-        or not st.session_state.get("assistant")
-    )
+    needs_initialization = not assistant_ready_for_session()
 
     with st.chat_message("assistant"):
         try:
@@ -2712,11 +2447,7 @@ def run_interaction(
                 last_status = {"label": ""}
 
                 if needs_initialization:
-                    success, error = initialize_assistant(
-                        provider_to_use,
-                        run_connection_probe=False,
-                        show_spinner=False,
-                    )
+                    success, error = initialize_assistant(show_spinner=False)
                     if not success:
                         status.update(
                             label="⚠️ Não foi possível preparar o LISBOA."
@@ -2783,15 +2514,15 @@ def run_interaction(
             )
 
         except Exception as error:
-            # Log the FULL traceback to the terminal for debugging
-            import traceback
+            # Log the full traceback to the terminal for debugging, without
+            # the visitor's key if a provider error echoes it.
             print(f"\n{'=' * 70}")
             print("ERROR during chat interaction:")
             print(f"  Query: {user_input}")
             print(f"  Error type: {type(error).__name__}")
-            print(f"  Error message: {error}")
+            print(f"  Error message: {redact_session_secret(str(error))}")
             print(f"{'=' * 70}")
-            traceback.print_exc()
+            print(redact_session_secret(traceback.format_exc()), end="")
             print(f"{'=' * 70}\n")
 
             friendly_message = build_user_error_message(error)
@@ -3449,6 +3180,14 @@ def run_info_page() -> None:
             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23111827' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-4 0v7h-4v-7a6 6 0 0 1 6-6z'/%3E%3Crect width='4' height='12' x='2' y='9'/%3E%3Ccircle cx='4' cy='4' r='2'/%3E%3C/svg%3E");
         }
 
+        .info-author-link-thesis {
+            grid-column: 1 / -1;
+        }
+
+        .info-author-link-thesis::before {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23111827' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z'/%3E%3Cpath d='M22 10v6'/%3E%3Cpath d='M6 12.5V16a6 3 0 0 0 12 0v-3.5'/%3E%3C/svg%3E");
+        }
+
         .info-author-link-article::before {
             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23111827' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z'/%3E%3Cpath d='M14 2v4a2 2 0 0 0 2 2h4'/%3E%3Cpath d='M10 9H8'/%3E%3Cpath d='M16 13H8'/%3E%3Cpath d='M16 17H8'/%3E%3C/svg%3E");
         }
@@ -3765,6 +3504,7 @@ def run_info_page() -> None:
         '<em>Results in Engineering</em>, 32 (2026), 113369</a></span></p>'
         '</div>'
         '<div class="info-author-links">'
+        f'<a class="info-author-link info-author-link-thesis" href="{THESIS_URL}" target="_blank" rel="noopener noreferrer"><span>{html.escape(t("info_author_thesis"))}</span></a>'
         f'<a class="info-author-link info-author-link-article" href="{ARTICLE_DOI_URL}" target="_blank" rel="noopener noreferrer"><span>{html.escape(t("info_author_article"))}</span></a>'
         f'<a class="info-author-link info-author-link-doi" href="{SOFTWARE_DOI_URL}" target="_blank" rel="noopener noreferrer"><span>{html.escape(t("info_author_software"))}</span></a>'
         f'<a class="info-author-link info-author-link-github" href="https://github.com/Silvestre17" target="_blank" rel="noopener noreferrer"><span>{html.escape(t("info_author_github"))}</span></a>'
@@ -3795,13 +3535,14 @@ def main():
     init_system_state()
     st.markdown(CSS, unsafe_allow_html=True)
     sync_page_from_query_params()
+    # Hosted only, at most once per LISBOA_DATA_REFRESH_HOURS, in the background.
+    schedule_runtime_data_refresh()
 
-    preselected_provider = selected_provider_from_runtime_state()
     st.session_state.startup_auto_init_in_progress = (
-        should_lock_for_startup_auto_initialization(preselected_provider)
+        should_lock_for_startup_auto_initialization()
     )
 
-    selected_provider, q_act = build_sidebar()
+    build_sidebar()
 
     if st.session_state.current_page == "info":
         st.session_state.startup_auto_init_in_progress = False
@@ -3815,10 +3556,6 @@ def main():
         request_running,
         startup_initializing=st.session_state.get("startup_auto_init_in_progress", False),
     )
-
-    if q_act and not request_locked:
-        queue_pending_request(q_act)
-        st.rerun()
 
     if in_text := st.chat_input(t("chat_placeholder"), disabled=request_locked):
         queue_pending_request(in_text)
@@ -3836,7 +3573,7 @@ def main():
         banner_slot.empty()
 
     if show_landing:
-        attempt_startup_auto_initialization(selected_provider)
+        attempt_startup_auto_initialization()
 
     request_locked = request_capture_locked(
         pending,
@@ -3892,7 +3629,6 @@ def main():
                 run_interaction(
                     pending,
                     user_message_already_rendered=already_appended,
-                    selected_provider=selected_provider,
                 )
         finally:
             st.session_state.request_running = False
@@ -3900,35 +3636,17 @@ def main():
         # turn immediately instead of waiting for the next user action.
         st.rerun()
 
-    if not st.session_state.initialized:
-        credentials_ready, _ = provider_has_required_credentials(selected_provider)
+    if not assistant_ready_for_session():
         auto_init_error = st.session_state.get("startup_auto_init_error")
-        if runtime_auto_initialize_enabled() and auto_init_error:
+        attempted_key = st.session_state.get("startup_auto_init_attempted_key")
+        if not session_llm_ready():
+            # Once a turn has run, its reply already carries this prompt.
+            if not st.session_state.messages:
+                st.info(llm_setup_message())
+        elif auto_init_error and attempted_key == session_llm_key():
             st.error(auto_init_error)
-        elif credentials_ready:
-            ready_message = (
-                "As credenciais já estão prontas. Envie uma pergunta para iniciar o assistente."
-                if st.session_state.language == "pt"
-                else "Your credentials are ready. Send a prompt to start the assistant."
-            )
-            if not runtime_auto_initialize_enabled():
-                ready_message = (
-                    "As credenciais já estão prontas. Pode clicar em **Ligar Sistema** na barra lateral ou enviar uma pergunta para iniciar automaticamente."
-                    if st.session_state.language == "pt"
-                    else "Your credentials are ready. Click **Connect System** in the sidebar or send a prompt to start automatically."
-                )
-            st.info(ready_message)
         else:
-            st.info(
-                "Configure as credenciais de produção nas variáveis de ambiente ou nos Streamlit secrets para começar."
-                if st.session_state.language == "pt" and not runtime_credential_inputs_enabled()
-                else "Configure the production credentials in environment variables or Streamlit secrets to get started."
-                if not runtime_credential_inputs_enabled()
-                else "Configure o fornecedor de IA nas definições laterais para começar."
-                if st.session_state.language == "pt"
-                else "Configure the AI provider in the sidebar settings to get started."
-            )
-
+            st.info(t("llm_ready_prompt"))
 
 if __name__ == "__main__":
     main()

@@ -9,6 +9,7 @@ on:
       - "app.py"
       - "config.py"
       - "requirements.txt"
+      - "requirements_local_embeddings.txt"
       - "pyproject.toml"
       - ".streamlit/config.toml"
       - "scripts/hf_space_entrypoint.py"
@@ -42,7 +43,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -63,6 +64,7 @@ jobs:
           cp app.py hf_space_build/
           cp config.py hf_space_build/
           cp requirements.txt hf_space_build/
+          cp requirements_local_embeddings.txt hf_space_build/
           cp pyproject.toml hf_space_build/
           cp LICENSE hf_space_build/
           cp scripts/hf_space_entrypoint.py hf_space_build/scripts/
@@ -144,6 +146,7 @@ jobs:
           ## Research Context
 
           - Project: LISBOA: Lisbon Itinerary System Based On AI
+          - Thesis: [RUN, Universidade NOVA de Lisboa](https://hdl.handle.net/10362/207399)
           - Article: Silvestre, A., Jardim, B., & de Castro Neto, M. (2026). A multi-agent approach for context-aware tourism and urban mobility guidance. *Results in Engineering*, 32, 113369. https://doi.org/10.1016/j.rineng.2026.113369
           - Source code and evaluation artifacts: [GitHub](https://github.com/Silvestre17/LISBOA_MultiAgentSystem) and [Zenodo](https://doi.org/10.5281/zenodo.23322220)
           - Scope: Master's thesis prototype, non-commercial academic use
@@ -155,7 +158,7 @@ jobs:
           EOF
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 

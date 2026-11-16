@@ -16,9 +16,11 @@ from urllib.parse import quote_plus
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent.agents.base import BaseAgent, clean_response
+from agent.llm_factory import LLMConnection
 from agent.prompts.planner import get_planner_prompt
 from agent.utils.langsmith_tracing import traceable
 from agent.utils.response_formatter import (
+    ENGLISH_NAME_WORD_RE,
     final_post_qa_guard,
     infer_response_language,
 )
@@ -8374,7 +8376,6 @@ def _localize_planner_display_title(title: str, language: str) -> str:
     cleaned = re.sub(r"\bJer[oó]nimos Monastery\b", "Mosteiro dos Jerónimos", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bNational Museum of Contempor[aâ]neo Art - Museu do Chiado\b", "Museu Nacional de Arte Contemporânea do Chiado", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bJewish Cultural Center\b", "Centro Cultural Judaico", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\bCultural Center\b", "Centro Cultural", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bRestaurant\b", "Restaurante", cleaned, flags=re.IGNORECASE)
 
     replacements = (
@@ -8386,8 +8387,13 @@ def _localize_planner_display_title(title: str, language: str) -> str:
         (r"^Palace of\s+", "Palácio de "),
     )
     for pattern, replacement in replacements:
-        if re.search(pattern, cleaned, flags=re.IGNORECASE):
-            return re.sub(pattern, replacement, cleaned, count=1, flags=re.IGNORECASE)
+        prefix = re.match(pattern, cleaned, flags=re.IGNORECASE)
+        if prefix:
+            # Only the type word is translated, so the rest must already be
+            # Portuguese: "Monastery of Odivelas – Convent of St. Dinis" stays.
+            if ENGLISH_NAME_WORD_RE.search(cleaned[prefix.end():]):
+                return cleaned
+            return replacement + cleaned[prefix.end():]
     return cleaned
 
 
@@ -13884,9 +13890,14 @@ class PlannerAgent(BaseAgent):
         return without using this agent.
     """
 
-    def __init__(self):
-        """Initializes the planner agent."""
-        super().__init__("planner")
+    def __init__(self, connection: Optional[LLMConnection] = None):
+        """Initializes the planner agent.
+
+        Args:
+            connection: Visitor endpoint for this session, or None for the
+                server provider.
+        """
+        super().__init__("planner", connection)
         self.system_prompt = get_planner_prompt(language="en")
         self._system_prompt_dynamic = True
         # Set by the orchestrator: turns consecutive stop pairs into movement

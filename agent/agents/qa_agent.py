@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent.agents.base import BaseAgent, clean_response, parse_json_response
+from agent.llm_factory import LLMConnection
 from agent.utils.langsmith_tracing import traceable
 from agent.prompts.qa import get_qa_prompt
 from agent.utils.response_formatter import (
@@ -519,9 +520,14 @@ class QualityAssuranceAgent(BaseAgent):
         additional worker execution.
     """
 
-    def __init__(self):
-        """Initializes the QA agent."""
-        super().__init__("qa")
+    def __init__(self, connection: Optional[LLMConnection] = None):
+        """Initializes the QA agent.
+
+        Args:
+            connection: Visitor endpoint for this session, or None for the
+                server provider.
+        """
+        super().__init__("qa", connection)
 
     @staticmethod
     def _normalize_query(user_query: str) -> str:
@@ -3250,7 +3256,7 @@ class QualityAssuranceAgent(BaseAgent):
                 "- Preserva links markdown válidos exatamente quando aparecem no rascunho ou nos outputs dos agentes. Nunca substituas campos com link por texto simples como Website oficial, VisitLisboa, Bilhetes ou Tickets.\n"
                 "- Preserva quaisquer perguntas interativas ao utilizador que estejam no final do texto (ex: perguntar se o utilizador quer planear o Dia 2).\n"
                 "- Não acrescentes notas ou avisos de QA ao output do utilizador. Repara silenciosamente ou omite campos sem suporte.\n"
-                "- Só mantém um aviso ⚠️ quando houver uma preocupação real de segurança ou quando o utilizador tiver pedido cautelas.\n"
+                "- Só mantém um aviso ⚠️ quando houver uma preocupação real de segurança ou quando o utilizador tiver pedido cautelas. Uma linha `⚠️ **Limitação:**` do rascunho que diz até onde os dados confirmam uma condição pedida pelo utilizador (público, crianças, acessibilidade, orçamento, dieta) fica como está, na sua própria linha antes da fonte, nunca dentro de um card.\n"
                 "- NUNCA promovas passos intermédios de uma rota (caminhar, transbordo, embarque, saída) a títulos `### ...`. Esses passos são bullets `-` dentro da secção `🗺️ O seu Trajeto de Metro:` e nunca devem ter um separador `---` entre eles.\n"
                 "- Preserva a estrutura visual já existente: títulos H3, listas, indentação a 4 espaços, separadores `---` e linhas em branco devem permanecer onde já estão. Não acrescentes novos `---` nem novos títulos H3.\n"
                 "- Devolve apenas a resposta final reparada, sem prefácio nem explicações."
@@ -3279,7 +3285,7 @@ class QualityAssuranceAgent(BaseAgent):
                 "- Preserve valid markdown links exactly when they appear in the draft or worker outputs. Never replace linked fields with plain text such as Official website, VisitLisboa, Tickets, or More details.\n"
                 "- Preserve any interactive questions to the user at the end of the text (e.g., asking if they want to plan Day 2).\n"
                 "- Do not add QA notes or QA warnings to the user output. Repair silently or omit unsupported fields.\n"
-                "- Keep a ⚠️ warning only for a real-world safety concern or when the user explicitly asked for caveats.\n"
+                "- Keep a ⚠️ warning only for a real-world safety concern or when the user explicitly asked for caveats. A `⚠️ **Limitation:**` line of the draft that says how far the data confirms a condition the user asked for (audience, children, accessibility, budget, diet) stays as written, on its own line before the source, never inside a card.\n"
                 "- NEVER promote intermediate route steps (walk, transfer, board, exit) to `### ...` headings. Those steps are list bullets `-` inside the `🗺️ Your Metro Route:` section and must not have `---` separators between them.\n"
                 "- Preserve the existing visual structure: H3 titles, list bullets, 4-space indentation, `---` separators and blank lines must stay where they already are. Do not add new `---` rules or new H3 titles.\n"
                 "- Return only the repaired final answer, with no preface or explanation."
@@ -3332,6 +3338,7 @@ class QualityAssuranceAgent(BaseAgent):
                 or self._repair_degraded_category_listing(draft_response, repaired)
                 or self._repair_collapsed_event_results_to_no_result(draft_response, repaired)
                 or self._repair_flipped_place_answer_to_event_no_result(draft_response, repaired)
+                or self._repair_dropped_limitation_line(draft_response, repaired)
             ):
                 return final_post_qa_guard(draft_response, language=language)
             repaired_lower = repaired.lower()
@@ -3361,6 +3368,17 @@ class QualityAssuranceAgent(BaseAgent):
             return final_response or ""
 
         return final_post_qa_guard(final_response, language=language)
+
+    @staticmethod
+    def _repair_dropped_limitation_line(draft_response: str, repaired_response: str) -> bool:
+        """Return whether QA dropped a limitation line or moved it into a card.
+
+        A draft line such as "⚠️ **Limitation:** ... suitability for children
+        is not confirmed" answers a condition the user set; losing it, or
+        nesting it under the last card as a description, hides that limit.
+        """
+        line_re = re.compile(r"(?m)^⚠️\s*\*\*(?:Limita[cç][aã]o|Limitation)")
+        return bool(line_re.search(draft_response or "")) and not line_re.search(repaired_response or "")
 
     @staticmethod
     def _repair_collapsed_structured_draft(draft_response: str, repaired_response: str) -> bool:

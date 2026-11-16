@@ -32,6 +32,7 @@ from agent.agents.base import (
     clean_response,
     is_local_provider,
 )
+from agent.llm_factory import LLMConnection
 from agent.planning.brief import plan_brief_transport_request
 from agent.utils.langsmith_tracing import (
     LANGSMITH_AVAILABLE,
@@ -176,6 +177,11 @@ _WORKER_BATCH_TIMEOUT_S = 120
 _FOLLOW_UP_DIGEST_MESSAGES = 6
 # Older user messages listed before them, for constraints given long ago.
 _FOLLOW_UP_OLDER_REQUESTS = 8
+# Characters of the earlier answer read when comparing its items.
+_COMPARISON_CONTEXT_CHARS = 12000
+# A closeness criterion ("qual destes fica mais perto?") on accent-folded text;
+# distances need coordinates, which the place-filter follow-up computes.
+_PROXIMITY_CRITERION_RE = re.compile(r"\b(?:perto|proxim\w*|near|nearest|closer|closest|distance|distancia)\b")
 # Card fields that do not help resolve a reference to an earlier answer.
 _CONTEXT_NOISE_FIELD_RE = re.compile(
     r"\*\*(?:Telefone|Phone|Email|Website|Avalia[cç][aã]o|Rating|Bilhetes|Tickets|Mais detalhes|"
@@ -428,8 +434,13 @@ class MultiAgentAssistant:
         - Configurable models per agent via config.py
     """
 
-    def __init__(self):
-        """Initializes the multi-agent assistant."""
+    def __init__(self, connection: Optional[LLMConnection] = None):
+        """Initializes the multi-agent assistant.
+
+        Args:
+            connection: Visitor endpoint for this session, or None for the
+                server provider configured in ``config.py``.
+        """
         from agent.agents.planner_agent import PlannerAgent
         from agent.agents.qa_agent import QualityAssuranceAgent
         from agent.agents.researcher_agent import ResearcherAgent
@@ -439,13 +450,13 @@ class MultiAgentAssistant:
         from agent.state import create_initial_state
 
         # Initialize agents
-        self.supervisor = SupervisorAgent()
-        self.qa_agent = QualityAssuranceAgent()
+        self.supervisor = SupervisorAgent(connection)
+        self.qa_agent = QualityAssuranceAgent(connection)
         self.agents = {
-            "weather": WeatherAgent(),
-            "transport": TransportAgent(),
-            "researcher": ResearcherAgent(),
-            "planner": PlannerAgent(),
+            "weather": WeatherAgent(connection),
+            "transport": TransportAgent(connection),
+            "researcher": ResearcherAgent(connection),
+            "planner": PlannerAgent(connection),
         }
         # The planner has no tools: the Transport worker resolves the legs
         # between the stops the planner chooses.
@@ -456,12 +467,26 @@ class MultiAgentAssistant:
         self.last_execution_summary: Dict[str, Any] | None = None
         # Outside-AML places removed from the current mixed-scope request.
         self._turn_outside_scope_labels: List[str] = []
+        self.model_info = self._collect_model_info()
 
-        self.model_info = {
+    def _collect_model_info(self) -> Dict[str, Any]:
+        """Returns the model settings of the supervisor, QA and every worker."""
+        return {
             "supervisor": self.supervisor.get_model_info(),
             "qa": self.qa_agent.get_model_info(),
             **{name: agent.get_model_info() for name, agent in self.agents.items()},
         }
+
+    def set_llm_connection(self, connection: Optional[LLMConnection]) -> None:
+        """Switches every agent to another model, keeping the conversation.
+
+        Args:
+            connection: Visitor endpoint for this session, or None for the
+                server provider configured in ``config.py``.
+        """
+        for agent in (self.supervisor, self.qa_agent, *self.agents.values()):
+            agent.configure_llm(connection)
+        self.model_info = self._collect_model_info()
 
     @property
     def model_name(self) -> str:
@@ -4681,7 +4706,7 @@ class MultiAgentAssistant:
             return {}
         wants_website = bool(re.search(r"\b(?:website|site|pagina|page)\b", normalized))
         wants_cheapest = bool(re.search(r"\b(?:barat\w*|cheap|cheapest|preco|price|econom)\b", normalized))
-        wants_nearest = bool(re.search(r"\b(?:perto|proxim\w*|near|nearest|closer|closest|distance|distancia)\b", normalized))
+        wants_nearest = bool(_PROXIMITY_CRITERION_RE.search(normalized))
         if not (wants_website or wants_cheapest or wants_nearest):
             return {}
 
@@ -4755,9 +4780,9 @@ class MultiAgentAssistant:
         note = ""
         if omitted_notes:
             note = (
-                "💡 Omiti cards da lista anterior com dados em falta (" + "; ".join(omitted_notes) + ")."
+                "💡 Omiti locais da lista anterior com dados em falta (" + "; ".join(omitted_notes) + ")."
                 if language == "pt"
-                else "💡 I omitted previous cards with missing data (" + "; ".join(omitted_notes) + ")."
+                else "💡 I left out earlier places with missing data (" + "; ".join(omitted_notes) + ")."
             )
         return {
             "direct_response": self._format_filtered_place_cards(
@@ -5051,6 +5076,48 @@ class MultiAgentAssistant:
             return {}
         return self.supervisor.interpret_follow_up(message, language, self._conversation_digest())
 
+    def _compare_earlier_items(self, message: str, language: str, question: str) -> Dict[str, Any]:
+        """Answer "which of these is cheaper / better for kids?" from the earlier answer.
+
+        Args:
+            message: The user's message as written.
+            language: Output language code (``pt`` or ``en``).
+            question: The interpreter's standalone comparison question.
+
+        Returns:
+            ``{"direct_response": ...}`` with the comparison and the earlier
+            answer's source footer, or an empty dict when the earlier answer is
+            missing or the comparison fails; the question is then routed normally.
+        """
+        if _PROXIMITY_CRITERION_RE.search(self._fold_context_text(message)):
+            return self._resolve_place_filter_follow_up(message, language)
+        recent_answers = [
+            str(previous.content)
+            for previous in reversed((self.state.get("messages") or [])[-_FOLLOW_UP_DIGEST_MESSAGES:])
+            if isinstance(previous, AIMessage) and str(previous.content or "").strip()
+        ]
+        if not recent_answers:
+            return {}
+        # "And which one is the cheapest?" after a comparison still compares
+        # the listed items, whose details are in the list, not in that comparison.
+        earlier_answer = next(
+            (answer for answer in recent_answers if len(self._extract_place_cards_from_answer(answer)[0]) >= 2),
+            recent_answers[0],
+        )
+        # Stops of an itinerary shown before a later answer can still be compared.
+        plan_text = str(self._get_conversation_anchors().get("last_plan_text") or "")
+        if plan_text and plan_text[:200] not in earlier_answer:
+            earlier_answer = f"{plan_text}\n\n{earlier_answer}"
+        earlier_answer = earlier_answer[-_COMPARISON_CONTEXT_CHARS:]
+        answer = self.supervisor.compare_earlier_items(message, question, language, earlier_answer)
+        if not answer:
+            return {}
+        footer = next(
+            (line.strip() for line in reversed(earlier_answer.splitlines()) if line.strip().startswith("📌")),
+            "",
+        )
+        return {"direct_response": f"{answer}\n\n{footer}".strip()}
+
     def _resolve_contextual_follow_up(self, message: str, language: str) -> Dict[str, Any]:
         """Resolve compact follow-ups such as 'there' or plan revision requests."""
         anchors = self._get_conversation_anchors()
@@ -5081,6 +5148,11 @@ class MultiAgentAssistant:
         if turn_kind in {"recall", "clarify"} and interpretation.get("answer"):
             label = "Resposta direta" if language == "pt" else "Direct answer"
             return {"direct_response": f"✅ **{label}:** {interpretation['answer']}"}
+        if turn_kind == "compare":
+            comparison = self._compare_earlier_items(message, language, interpretation["request"])
+            if comparison:
+                return comparison
+            message = interpretation["request"]
         if turn_kind == "plan_change" and has_previous_plan:
             return self._plan_revision_resolution(message, language, interpretation["request"])
         if turn_kind == "more_results":

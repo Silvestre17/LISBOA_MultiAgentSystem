@@ -34,6 +34,8 @@ import requests                 # To make HTTP requests
 from bs4 import BeautifulSoup   # To parse HTML content
 from tqdm import tqdm           # To show progress bars
 
+from http_session import create_session  # Retries transient HTTP failures
+
 # --- Configuration & Anti-Bot Measures ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -623,7 +625,7 @@ def main():
     # 2. Scrape URLs
     all_urls = set()
     failed_pages = 0
-    with requests.Session() as session:
+    with create_session() as session:
         total_pages = get_total_pages(session, base_url)
         logging.info("Harvesting URLs...")
 
@@ -666,7 +668,7 @@ def main():
         final_list = [existing_events[url] for url in removed_urls]
         removed_urls = set()
 
-    with requests.Session() as session:
+    with create_session() as session:
         # A. New
         if new_urls:
             logging.info(f"Scraping {len(new_urls)} new events.")

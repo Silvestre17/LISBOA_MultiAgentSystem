@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent.agents.base import BaseAgent, clean_response, parse_json_response
+from agent.llm_factory import LLMConnection
 from agent.planning.brief import (
     PlanBrief,
     build_plan_brief_messages,
@@ -23,7 +24,7 @@ from agent.planning.brief import (
     parse_plan_brief,
     roll_past_window_to_tomorrow,
 )
-from agent.prompts.follow_up import FOLLOW_UP_KINDS, build_follow_up_messages
+from agent.prompts.follow_up import FOLLOW_UP_KINDS, build_comparison_messages, build_follow_up_messages
 from agent.prompts.supervisor import get_supervisor_prompt
 from agent.utils.geographic_scope import (
     build_geographic_out_of_scope_response,
@@ -60,6 +61,10 @@ _TERSE_ROUTE_TOPIC_RE = re.compile(
 )
 
 
+# A comparison without a direct answer is asked once more, then routed normally.
+_COMPARISON_ATTEMPTS = 2
+
+
 class SupervisorAgent(BaseAgent):
     """
     Supervisor agent that routes queries to specialized agents.
@@ -71,9 +76,14 @@ class SupervisorAgent(BaseAgent):
         - Return routing decisions as structured JSON
     """
 
-    def __init__(self):
-        """Initializes the supervisor agent."""
-        super().__init__("supervisor")
+    def __init__(self, connection: Optional[LLMConnection] = None):
+        """Initializes the supervisor agent.
+
+        Args:
+            connection: Visitor endpoint for this session, or None for the
+                server provider.
+        """
+        super().__init__("supervisor", connection)
         # System prompt is now dynamic per request
 
     def build_plan_brief(
@@ -135,6 +145,62 @@ class SupervisorAgent(BaseAgent):
             "request": re.sub(r"\s+", " ", str(decision.get("request") or "")).strip() or user_message,
             "answer": re.sub(r"\s+", " ", str(decision.get("answer") or "")).strip(),
         }
+
+    def compare_earlier_items(self, user_message: str, question: str, language: str, earlier_answer: str) -> str:
+        """Answer a comparison between items of an earlier answer from that answer alone.
+
+        Args:
+            user_message: The user's message as written.
+            question: Standalone comparison question naming the items and the criterion.
+            language: Answer language of the turn (``pt`` or ``en``).
+            earlier_answer: The earlier answer that lists the compared items.
+
+        Returns:
+            The Markdown answer without a source footer, or ``""`` when the
+            model fails or twice leaves out the direct answer; the caller then
+            routes the question normally.
+        """
+        messages = build_comparison_messages(user_message, question, language, earlier_answer)
+        for _ in range(_COMPARISON_ATTEMPTS):
+            try:
+                response = self._safe_llm_invoke(self.llm, messages, retries=1)
+            except Exception as exc:
+                logger.warning("Comparison of earlier items failed: %s", exc)
+                return ""
+            answer = clean_response(str(getattr(response, "content", "") or ""), _print=False).strip()
+            # The verdict belongs in the direct answer, not only in a limitation.
+            if "✅" in answer:
+                return self._bold_only_compared_names(answer)
+        logger.warning("Comparison of earlier items came back without a direct answer.")
+        return ""
+
+    @staticmethod
+    def _bold_only_compared_names(answer: str) -> str:
+        """Drop bold around quoted values, keeping headings, labels, and item names.
+
+        Bold values next to bold names ("**Museu X:** **20% com Lisboa Card**")
+        merge or split in the final Markdown guards, so only the names that
+        head the bullets, the field labels, and the heading stay bold.
+
+        Args:
+            answer: The comparison Markdown written by the model.
+
+        Returns:
+            The same Markdown with every other bold span unwrapped.
+        """
+        names = {
+            match.group("name").strip().rstrip(":")
+            for match in re.finditer(r"(?m)^\s*[-*]\s+\*\*(?P<name>[^*\n]+?)\*\*", answer)
+        }
+
+        def unwrap(match: re.Match) -> str:
+            inner = match.group(1).strip()
+            return match.group(0) if inner.rstrip(":") in names or inner.endswith(":") else match.group(1)
+
+        return "\n".join(
+            line if line.lstrip().startswith("#") else re.sub(r"\*\*([^*\n]+?)\*\*", unwrap, line)
+            for line in answer.splitlines()
+        )
 
     @staticmethod
     def _normalize_query(user_message: str) -> str:

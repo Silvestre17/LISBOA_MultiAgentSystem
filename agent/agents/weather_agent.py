@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
 from agent.agents.base import BaseAgent
+from agent.llm_factory import LLMConnection
 from agent.prompts.weather import get_weather_prompt
 from agent.utils.geographic_scope import (
     extract_aml_municipality_mentions,
@@ -197,9 +198,14 @@ class WeatherAgent(BaseAgent):
         scenarios to preserve language and follow-up hints.
     """
 
-    def __init__(self):
-        """Initializes the weather agent."""
-        super().__init__("weather")
+    def __init__(self, connection: Optional[LLMConnection] = None):
+        """Initializes the weather agent.
+
+        Args:
+            connection: Visitor endpoint for this session, or None for the
+                server provider.
+        """
+        super().__init__("weather", connection)
         self.system_prompt = get_weather_prompt(language="en")
         self._system_prompt_dynamic = True
 

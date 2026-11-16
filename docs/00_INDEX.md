@@ -34,7 +34,7 @@ This documentation describes the current `main` branch. Its statements are ancho
 Use Python **3.10 to 3.13** and configure one supported LLM provider in `.env` before launching the app:
 
 ```bash
-python -m pip install -r requirements.txt
+python -m pip install -r requirements_local_embeddings.txt
 cp .env.example .env    # Windows PowerShell: Copy-Item .env.example .env
 python tools/vector_store.py
 streamlit run app.py

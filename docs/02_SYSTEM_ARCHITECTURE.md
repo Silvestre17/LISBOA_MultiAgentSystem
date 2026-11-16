@@ -101,11 +101,10 @@ Follow-ups are resolved against the smallest relevant earlier object: a route, p
 
 The committed production configuration:
 
-- selects Azure OpenAI (`MODEL_PROVIDER = "azure"`);
-- disables provider selection (`ENABLE_PROVIDER_SELECTOR = False`);
-- disables credential editing (`ENABLE_PROVIDER_CREDENTIAL_INPUTS = False`).
+- selects Azure OpenAI (`MODEL_PROVIDER = "azure"`) as the server default;
+- lets each visitor switch their own session to an OpenAI-compatible endpoint, key and model (`ALLOW_VISITOR_LLM_SETTINGS`, on by default).
 
-Development builds can enable a provider-level selector in the sidebar. The interface has no per-agent model selector; those mappings stay in code.
+A visitor connection (`LLMConnection` in `agent/llm_factory.py`) lives in that visitor's Streamlit session and is passed explicitly to every agent of their session assistant; nothing process-wide changes. The interface has no per-agent model selector; those mappings stay in code.
 
 ## 🛡️ Reliability Mechanisms
 

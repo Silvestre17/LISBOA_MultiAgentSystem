@@ -66,7 +66,7 @@ permissions:
   contents: write
 
 env:
-  PYTHON_VERSION: "3.10"
+  PYTHON_VERSION: "3.12"
   # Force unbuffered output to see logs immediately
   PYTHONUNBUFFERED: "1"
   # Disable telemetry for faster startup
@@ -120,14 +120,14 @@ jobs:
       # =====================================================================
 
       - name: Checkout Repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           # Fetch all history for proper git operations
           fetch-depth: 0
           lfs: true
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -136,7 +136,7 @@ jobs:
       # =====================================================================
 
       - name: Cache pip packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         id: cache-pip
         with:
           path: ~/.cache/pip
@@ -145,7 +145,7 @@ jobs:
             ${{ runner.os }}-pip-vectordb-
 
       - name: Cache HuggingFace models
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         id: cache-hf
         with:
           path: ${{ env.HF_HOME }}

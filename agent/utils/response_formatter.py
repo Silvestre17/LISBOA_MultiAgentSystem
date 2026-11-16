@@ -42,6 +42,15 @@ _PT_CATEGORY_VALUE_MAP = {
     "shopping": "Compras",
 }
 
+# English words that keep a place name English after its type word: "Church of
+# Our Lady of the Consolation" is not translated to "Igreja de Our Lady of the
+# Consolation"; a name is translated whole or kept as published.
+ENGLISH_NAME_WORD_RE = re.compile(
+    r"\b(?:of|the|and|our|lady|saint|st|holy|sacred|heart|convent|monastery|church|chapel|"
+    r"palace|museum|garden|gardens|tower|house|castle|square|centre|center)\b",
+    re.IGNORECASE,
+)
+
 _PT_DURATION_VALUE_MAP = {
     "single day": "Um só dia",
     "one day": "Um só dia",
@@ -5675,6 +5684,9 @@ _BULLET_BOLD_RESEARCHER_CARD_START_RE = re.compile(
 _BOLD_RESEARCHER_CARD_START_RE = re.compile(
     r"^\*\*(?![📂📍🕐⭐📞🔗🌐💶🎟️📝])(?P<emoji>\S+)\s+(?P<title>.+?)\*\*\s*$"
 )
+# A labelled note at column 0 ("⚠️ **Limitação:** ...") closes the card list;
+# it is never a field of the card above it.
+_RESEARCHER_SECTION_NOTE_RE = re.compile(r"^(?:⚠️|💡|ℹ️)\s*\*\*[^*\n]+:\*\*")
 
 
 def _researcher_card_labels(language: str) -> dict[str, str]:
@@ -8201,7 +8213,7 @@ def format_researcher_card(text: str, language: str = "en", user_query: str = ""
             flush_card()
             output_lines.append(raw_line)
             continue
-        if _SOURCE_LINE_RE.match(stripped):
+        if _SOURCE_LINE_RE.match(stripped) or _RESEARCHER_SECTION_NOTE_RE.match(raw_line):
             flush_card()
             output_lines.append(raw_line)
             continue
@@ -22679,9 +22691,16 @@ def final_post_qa_guard(
             guarded = re.sub(r"\bLisbon Cathedral\b", "Sé de Lisboa", guarded)
             guarded = re.sub(r"\bSé de Lisboa\s*\|\s*Lisbon Cathedral\b", "Sé de Lisboa", guarded)
             guarded = re.sub(r"\bSe de Lisboa\s*\|\s*Lisbon Cathedral\b", "Sé de Lisboa", guarded)
-            guarded = re.sub(r"\bChapel of\s+([A-ZÀ-ÿ][^:\n*|]+)", r"Capela de \1", guarded)
-            guarded = re.sub(r"\bChurch of\s+([A-ZÀ-ÿ][^:\n*|]+)", r"Igreja de \1", guarded)
-            guarded = re.sub(r"\bCathedral of\s+([A-ZÀ-ÿ][^:\n*|]+)", r"Catedral de \1", guarded)
+            for english_prefix, portuguese_prefix in (("Chapel", "Capela"), ("Church", "Igreja"), ("Cathedral", "Catedral")):
+                guarded = re.sub(
+                    rf"\b{english_prefix} of\s+([A-ZÀ-ÿ][^:\n*|]+)",
+                    lambda match, prefix=portuguese_prefix: (
+                        match.group(0)
+                        if ENGLISH_NAME_WORD_RE.search(match.group(1))
+                        else f"{prefix} de {match.group(1)}"
+                    ),
+                    guarded,
+                )
             guarded = guarded.replace(
                 "Aqui tens os principais locais que encontrei em Lisboa para o que pediste.",
                 "Aqui tens os principais locais que encontrei para o que pediste.",

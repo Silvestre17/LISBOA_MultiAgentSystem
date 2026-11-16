@@ -25,6 +25,10 @@ PRICING_METADATA_ALIASES = {
     "pricing_snapshot_date": "pricing_snapshot_date",
 }
 _LOCAL_PROVIDER_PREFIXES = ("lmstudio::", "local::", "ollama::")
+# Models a visitor reaches through their own OpenAI-compatible provider
+# (agent/llm_factory.py LLMConnection). Their price is unknown to LISBOA and
+# billed to the visitor's account, not the server's.
+_VISITOR_PROVIDER_PREFIX = "compatible::"
 # NOTE:
 # These aliases are only for lexical normalization, such as punctuation or
 # separator variants of the *same* catalog model identifier. They must not be
@@ -483,6 +487,23 @@ def resolve_usage_model_id(
     return default_model_id
 
 
+def _missing_pricing_label(model_id: str | None) -> str:
+    """Return how a model without catalog pricing is named in cost summaries.
+
+    Args:
+        model_id: Provider-qualified model identifier.
+
+    Returns:
+        str: The model id, or for a visitor's own provider the plain model
+        name with a note instead of the internal provider label.
+    """
+    if not model_id:
+        return "unknown_model"
+    if normalize_model_lookup_key(model_id).startswith(_VISITOR_PROVIDER_PREFIX):
+        return f"{model_id.split('::', 1)[1]} (visitor's own provider, not priced)"
+    return model_id
+
+
 def _build_single_model_cost_payload(
     tokens: dict[str, int],
     pricing_by_model: Optional[dict[str, Any]],
@@ -516,7 +537,7 @@ def _build_single_model_cost_payload(
     pricing_complete = total_tokens == 0 or (input_price is not None and output_price is not None)
     missing_models = []
     if total_tokens > 0 and not pricing_complete:
-        missing_models = [model_id] if model_id else ["unknown_model"]
+        missing_models = [_missing_pricing_label(model_id)]
 
     return {
         "model_id": model_id,

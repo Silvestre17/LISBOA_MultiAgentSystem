@@ -42,7 +42,7 @@ import unicodedata
 import zipfile
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
-from io import BytesIO
+from io import BytesIO, TextIOWrapper
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -789,18 +789,21 @@ class CarrisGTFSManager:
 
                 # An import error aborts the build: a feed with stops but
                 # without its trips or times must not replace a working database.
+                # Rows are streamed: stop_times has millions of them, too many to
+                # hold in memory on a hosted instance.
+                row_count = 0
                 with z.open(filename) as f:
-                    content = f.read().decode("utf-8-sig")
-                    rows = list(csv.DictReader(content.splitlines()))
+                    reader = csv.DictReader(TextIOWrapper(f, encoding="utf-8-sig", newline=""))
+                    cols = reader.fieldnames or []
+                    if cols:
+                        placeholders = ",".join(["?" for _ in cols])
+                        sql = f"INSERT INTO {table_name} ({','.join(cols)}) VALUES ({placeholders})"
+                        cursor.executemany(sql, ([row.get(c, "") or None for c in cols] for row in reader))
+                        row_count = cursor.rowcount
 
-                if not rows and table_name in _REQUIRED_GTFS_TABLES:
+                if not row_count and table_name in _REQUIRED_GTFS_TABLES:
                     raise ValueError(f"{filename} is empty")
-                if rows:
-                    cols = list(rows[0].keys())
-                    placeholders = ",".join(["?" for _ in cols])
-                    sql = f"INSERT INTO {table_name} ({','.join(cols)}) VALUES ({placeholders})"
-                    cursor.executemany(sql, [[row.get(c, "") or None for c in cols] for row in rows])
-                logger.info(f"  {filename}: {len(rows):,} rows")
+                logger.info(f"  {filename}: {row_count:,} rows")
 
             conn.commit()
 

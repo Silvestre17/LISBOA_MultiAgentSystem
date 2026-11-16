@@ -200,12 +200,14 @@ class KnowledgeBase:
     synchronization logic for different data sources.
     """
 
-    def __init__(self, use_gpu: bool = True):
+    def __init__(self, use_gpu: bool = True, embeddings_backend: Optional[str] = None):
         """
         Initializes the KnowledgeBase.
 
         Args:
             use_gpu (bool): Whether to attempt using GPU for embeddings. Defaults to True.
+            embeddings_backend (str, optional): ``local`` or ``cloudflare``;
+                defaults to ``Config.embeddings_backend()``.
         """
         print("\033[1m📥 Initializing KnowledgeBase...\033[0m", flush=True)
 
@@ -213,42 +215,17 @@ class KnowledgeBase:
         print("   Importing AI libraries (this may take a moment)...", flush=True)
         global \
             Chroma, \
-            HuggingFaceEmbeddings, \
             Document, \
             RecursiveCharacterTextSplitter, \
             PyPDFLoader
         from langchain_chroma import Chroma
         from langchain_community.document_loaders import PyPDFLoader
         from langchain_core.documents import Document
-        from langchain_huggingface import HuggingFaceEmbeddings
         from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-        print(f"   Loading Embeddings: {Config.EMBEDDING_MODEL_NAME}...", flush=True)
+        from tools.embeddings import create_embeddings
 
-        import torch
-
-        # The hosted Space installs CPU-only torch; local CUDA builds use the GPU.
-        device = "cuda" if use_gpu and torch.cuda.is_available() else "cpu"
-        try:
-            self.embeddings = HuggingFaceEmbeddings(
-                model_name=Config.EMBEDDING_MODEL_NAME,
-                model_kwargs={"device": device},
-                encode_kwargs={"normalize_embeddings": True},
-            )
-            print(
-                f"   \033[1;32m✓ Embeddings ready on {device.upper()}\033[0m",
-                flush=True,
-            )
-        except Exception as e:
-            print(
-                f"   \033[1;33m⚠ GPU error: {e}. Falling back to CPU.\033[0m",
-                flush=True,
-            )
-            self.embeddings = HuggingFaceEmbeddings(
-                model_name=Config.EMBEDDING_MODEL_NAME,
-                model_kwargs={"device": "cpu"},
-                encode_kwargs={"normalize_embeddings": True},
-            )
+        self.embeddings = create_embeddings(use_gpu=use_gpu, backend=embeddings_backend)
 
         self.vector_db_path = str(Config.VECTOR_DB_DIR)
         os.makedirs(self.vector_db_path, exist_ok=True)
@@ -379,6 +356,30 @@ class KnowledgeBase:
                 )
                 self._collections[collection_name] = vectorstore
         return vectorstore
+
+    def switch_database(self, vector_db_path: Path) -> List["Chroma"]:
+        """Point new searches at another ChromaDB directory.
+
+        Searches already running keep the collection handles they hold.
+
+        Args:
+            vector_db_path (Path): Directory with the replacement ChromaDB files.
+
+        Returns:
+            List[Chroma]: The previous handles, for :meth:`close_collections`
+            once no search can still be using them.
+        """
+        with self._collections_lock:
+            retired = list(self._collections.values())
+            self.vector_db_path = str(vector_db_path)
+            self._collections = {}
+        return retired
+
+    @staticmethod
+    def close_collections(handles: List["Chroma"]) -> None:
+        """Release the ChromaDB clients behind retired collection handles."""
+        for handle in handles:
+            handle._client.close()
 
     def _get_existing_docs(self, collection_name: str) -> Dict[str, str]:
         """
@@ -1092,7 +1093,8 @@ Examples:
     print("\033[1m" + "=" * 60 + "\033[0m", flush=True)
 
     try:
-        kb = KnowledgeBase(use_gpu=not args.no_gpu)
+        # The store is always built and inspected with the local model.
+        kb = KnowledgeBase(use_gpu=not args.no_gpu, embeddings_backend="local")
 
         if args.stats:
             print("\n\033[1m📊 Database Statistics\033[0m", flush=True)

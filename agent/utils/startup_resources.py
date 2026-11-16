@@ -7,6 +7,7 @@
 #     - Warm vector-store resources before first request
 #     - Prepare static transport support datasets and caches
 #     - Return structured preload status for app and script callers
+#     - Refresh release-backed data in the background on hosted deployments
 # ==========================================================================
 
 from __future__ import annotations
@@ -16,15 +17,23 @@ import json
 import os
 import sqlite3
 import threading
+import time
 from pathlib import Path
 from typing import Any, Dict
 
-from tools.runtime_paths import is_hosted_space_runtime
+from tools.runtime_paths import is_hosted_deployment
 
 
 STARTUP_LOG_SEPARATOR = "=" * 72
 _STARTUP_PRELOAD_LOCK = threading.Lock()
 _STARTUP_PRELOAD_STATUS: Dict[str, Any] | None = None
+# Searches finish in seconds; a replaced vector DB is closed and deleted after
+# this delay so no running search loses its collection.
+RETIRED_VECTOR_DB_GRACE_SECONDS = 600
+_DATA_REFRESH_LOCK = threading.Lock()
+# Startup downloads current data, so the first refresh is one interval later.
+_DATA_REFRESH_LAST_STARTED_AT = time.monotonic()
+_DATA_REFRESH_THREAD: threading.Thread | None = None
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -44,7 +53,7 @@ def _reuse_local_transport_data_enabled() -> bool:
     """Return whether startup may skip remote transport freshness checks."""
     return (
         _env_flag("LISBOA_REUSE_LOCAL_TRANSPORT_DATA", False)
-        and not is_hosted_space_runtime()
+        and not is_hosted_deployment()
     )
 
 
@@ -601,7 +610,16 @@ def pre_warm_vector_store() -> bool:
                 flush=True,
             )
 
-        initialize_vector_store()
+        if initialize_vector_store() is None:
+            # The data is present, so the app still serves requests: place
+            # searches use the catalogue fallback and the knowledge-base tool
+            # reports that semantic search is unavailable.
+            print(
+                "⚠️ Semantic search unavailable: the embeddings backend did not start "
+                "(see the vector store warning above)",
+                flush=True,
+            )
+            return True
         print("✅ KnowledgeBase object initialized and ready for semantic search", flush=True)
         return True
     except Exception as exc:
@@ -692,3 +710,96 @@ def run_startup_preload(language: str = "pt", force_refresh: bool = False) -> Di
             _STARTUP_PRELOAD_STATUS = dict(startup_status)
 
         return startup_status
+
+
+def _retire_vector_db(handles: list, directory: Path) -> None:
+    """Close the clients of a replaced vector DB and delete its refresh copy."""
+    from agent.utils.vector_db_release import remove_retired_vector_db
+    from tools.vector_store import KnowledgeBase
+
+    KnowledgeBase.close_collections(handles)
+    remove_retired_vector_db(directory)
+
+
+def _refresh_vector_store() -> None:
+    """Switch the knowledge base to a newer vector DB release, if one exists."""
+    from agent.utils.vector_db_release import refresh_vector_db_from_release
+    from tools.visitlisboa_api import initialize_vector_store
+
+    knowledge_base = initialize_vector_store()
+    if knowledge_base is None:
+        return
+    active_dir = Path(knowledge_base.vector_db_path)
+    new_dir = refresh_vector_db_from_release(active_dir)
+    if new_dir is None:
+        _startup_log("✅ Vector DB refresh: the active data matches the latest release")
+        return
+
+    retired_handles = knowledge_base.switch_database(new_dir)
+    _startup_log(f"✅ Vector DB refresh: searches now use {new_dir}")
+    timer = threading.Timer(
+        RETIRED_VECTOR_DB_GRACE_SECONDS,
+        _retire_vector_db,
+        args=(retired_handles, active_dir),
+    )
+    timer.daemon = True
+    timer.start()
+
+
+def refresh_runtime_data() -> None:
+    """Swap in a newer vector DB release and CP GTFS feed while the app runs.
+
+    Carris Urban refreshes itself from its live feed (``tools/carris_api.py``);
+    the transport release assets remain a cold-start fallback only. Failures
+    are logged and the current data stays in use.
+    """
+    _startup_log("🔄 Runtime data refresh: checking the vector DB release and the CP GTFS feed")
+    try:
+        _refresh_vector_store()
+    except Exception as exc:
+        _startup_log(f"⚠️ Vector DB refresh failed; serving the current data ({exc})")
+
+    try:
+        from tools.cp_api import get_gtfs_manager
+
+        cp_ready = get_gtfs_manager().ensure_database(force_refresh=False)
+    except Exception as exc:
+        _startup_log(f"⚠️ CP GTFS refresh failed; serving the current database ({exc})")
+        return
+    if cp_ready:
+        _startup_log("✅ CP GTFS refresh: the database is current")
+    else:
+        _startup_log("⚠️ CP GTFS refresh: no usable database")
+
+
+def schedule_runtime_data_refresh() -> bool:
+    """Start a background data refresh on hosted deployments when one is due.
+
+    Hosted apps run for days while the workflows republish the vector DB and
+    the operators update their feeds. At most once per
+    ``Config.RUNTIME_DATA_REFRESH_SECONDS``, the caller (a Streamlit rerun)
+    starts one daemon thread; requests never wait for it.
+
+    Returns:
+        bool: Whether a refresh thread was started.
+    """
+    global _DATA_REFRESH_LAST_STARTED_AT, _DATA_REFRESH_THREAD
+
+    from config import Config
+
+    if not Config.IS_HOSTED:
+        return False
+    with _DATA_REFRESH_LOCK:
+        now = time.monotonic()
+        if now - _DATA_REFRESH_LAST_STARTED_AT < Config.RUNTIME_DATA_REFRESH_SECONDS:
+            return False
+        if _DATA_REFRESH_THREAD is not None and _DATA_REFRESH_THREAD.is_alive():
+            return False
+        _DATA_REFRESH_LAST_STARTED_AT = now
+        _DATA_REFRESH_THREAD = threading.Thread(
+            target=refresh_runtime_data,
+            name="lisboa-data-refresh",
+            daemon=True,
+        )
+        _DATA_REFRESH_THREAD.start()
+    return True

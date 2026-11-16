@@ -2,116 +2,98 @@
 # Master Thesis
 #   - André Filipe Gomes Silvestre, 20240502
 #
-# Raw model connection probe helpers.
+# Capability check for visitor model connections.
 #
-# These helpers validate provider/model readiness using direct HTTP requests
-# instead of LangChain/LangGraph invocation paths. This is intentional so the
-# UI connection checks do not create LangSmith traces or consume the tracing
-# quota reserved for real user requests.
+# Sends one minimal tool-calling request through the same chat-model client
+# the agents use (streaming, usage reporting and tool binding included), so a
+# connection that passes is one the agents can use. LangSmith tracing is off
+# for the call, and failures are reduced to reason codes: provider error
+# bodies, which can echo part of a key, never reach the UI or the logs.
 # ==========================================================================
 
 # Required libraries:
-# pip install requests
+# pip install langchain-core langchain-openai openai
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+import logging
+from typing import Optional
 
-import requests
+import openai
+from langchain_core.messages import HumanMessage
 
-from agent.llm_factory import LLMFactory
+from agent.llm_factory import LLMConnection, LLMFactory
+from agent.utils.langsmith_tracing import tracing_context
 
+logger = logging.getLogger(__name__)
 
-def build_connection_probe_request(test_llm: Any, model_display: str) -> Dict[str, Any]:
-    """Build the raw HTTP request payload used by the model readiness check.
-
-    Args:
-        test_llm: LangChain chat model instance used by the app.
-        model_display: Human-readable model label used as a fallback.
-
-    Returns:
-        Dict[str, Any]: Endpoint, headers, payload, and resolved model id.
-    """
-    raw_base = getattr(
-        test_llm,
-        "openai_api_base",
-        getattr(test_llm, "base_url", "https://api.openai.com/v1/"),
-    )
-    base_url = str(raw_base) if not isinstance(raw_base, str) else raw_base
-
-    api_key_obj = getattr(
-        test_llm,
-        "openai_api_key",
-        getattr(test_llm, "api_key", getattr(test_llm, "_api_key", "")),
-    )
-    api_key = (
-        api_key_obj.get_secret_value()
-        if hasattr(api_key_obj, "get_secret_value")
-        else str(api_key_obj)
-    )
-    model_id = getattr(test_llm, "model_name", getattr(test_llm, "model", model_display))
-
-    headers = {"Content-Type": "application/json"}
-    if api_key and api_key != "None":
-        headers["Authorization"] = f"Bearer {api_key}"
-
-    payload = {
-        "model": model_id,
-        "messages": [{"role": "user", "content": "hi"}],
-    }
-    if LLMFactory._is_reasoning_model(model_id):
-        payload["max_completion_tokens"] = 100
-    else:
-        payload["max_tokens"] = 1
-        payload["temperature"] = 0
-
-    return {
-        "endpoint": f"{base_url.rstrip('/')}/chat/completions",
-        "headers": headers,
-        "payload": payload,
-        "model_id": model_id,
-    }
+CHECK_TIMEOUT_SECONDS = 60
+CHECK_TOOL_NAME = "report_status"
+_CHECK_TOOL = {
+    "type": "function",
+    "function": {
+        "name": CHECK_TOOL_NAME,
+        "description": "Report that the connection works.",
+        "parameters": {
+            "type": "object",
+            "properties": {"status": {"type": "string", "enum": ["ok"]}},
+            "required": ["status"],
+        },
+    },
+}
+_CHECK_PROMPT = f"Call the {CHECK_TOOL_NAME} tool with status set to ok."
 
 
-def perform_raw_model_connection_probe(
-    test_llm: Any,
-    provider: str,
-    model_display: str,
-    timeout_by_provider: Optional[Dict[str, float]] = None,
-) -> Dict[str, Any]:
-    """Validate model readiness using a raw HTTP request outside tracing paths.
+def _failure_reason(exc: Exception) -> str:
+    """Map a provider exception to a reason code without reading secrets.
 
     Args:
-        test_llm: LangChain chat model instance used by the app.
-        provider: Provider identifier (for timeout selection).
-        model_display: Human-readable model label used as a fallback.
-        timeout_by_provider: Optional timeout overrides by provider.
+        exc: Exception raised by the chat-model call.
 
     Returns:
-        Dict[str, Any]: Probe metadata, including the resolved model id.
-
-    Raises:
-        requests.RequestException: If the HTTP request fails.
-        RuntimeError: If the provider responds without a completion payload.
+        str: ``auth``, ``not_found``, ``rate_limit``, ``connection``,
+        ``bad_request`` or ``unknown``.
     """
-    request_data = build_connection_probe_request(test_llm, model_display)
-    timeout_lookup = timeout_by_provider or {}
-    timeout = timeout_lookup.get(provider, 15 if provider == "lmstudio" else 10)
+    if isinstance(exc, (openai.AuthenticationError, openai.PermissionDeniedError)):
+        return "auth"
+    if isinstance(exc, openai.NotFoundError):
+        return "not_found"
+    if isinstance(exc, openai.RateLimitError):
+        return "rate_limit"
+    if isinstance(exc, openai.APIConnectionError):
+        return "connection"
+    if isinstance(exc, (openai.BadRequestError, openai.UnprocessableEntityError)):
+        # Some providers, such as Gemini, answer an invalid key with HTTP 400.
+        return "auth" if "api key" in str(exc).lower() else "bad_request"
+    return "unknown"
 
-    response = requests.post(
-        request_data["endpoint"],
-        headers=request_data["headers"],
-        json=request_data["payload"],
-        timeout=timeout,
+
+def check_tool_calling(connection: LLMConnection) -> Optional[str]:
+    """Check that a visitor connection answers with a tool call.
+
+    Args:
+        connection: Visitor endpoint, model and key to check.
+
+    Returns:
+        Optional[str]: None when the model called the check tool, otherwise a
+        reason code: ``auth``, ``not_found``, ``rate_limit``, ``connection``,
+        ``bad_request``, ``no_tool_call`` or ``unknown``.
+    """
+    llm = LLMFactory.get_connection_llm(
+        connection,
+        timeout=CHECK_TIMEOUT_SECONDS,
+        max_retries=1,
     )
-    response.raise_for_status()
+    try:
+        with tracing_context(enabled=False):
+            response = llm.bind_tools([_CHECK_TOOL]).invoke([HumanMessage(content=_CHECK_PROMPT)])
+    except Exception as exc:
+        reason = _failure_reason(exc)
+        logger.warning("Model capability check failed: %s (%s)", reason, type(exc).__name__)
+        return reason
 
-    response_json = response.json()
-    if not response_json.get("choices"):
-        raise RuntimeError("The server responded without a completion.")
-
-    return {
-        "endpoint": request_data["endpoint"],
-        "model_id": request_data["model_id"],
-        "response": response_json,
-    }
+    tool_calls = getattr(response, "tool_calls", None) or []
+    if not any(call.get("name") == CHECK_TOOL_NAME for call in tool_calls):
+        logger.warning("Model capability check failed: no_tool_call")
+        return "no_tool_call"
+    return None

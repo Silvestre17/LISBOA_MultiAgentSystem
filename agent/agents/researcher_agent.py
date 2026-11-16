@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from agent.planning.brief import PlanBrief
 
 from agent.agents.base import BaseAgent, parse_json_response
+from agent.llm_factory import LLMConnection
 from agent.planning.brief import plan_brief_from_context, strip_plan_brief_from_context
 from agent.prompts.researcher import get_researcher_prompt
 from agent.utils.langsmith_tracing import ContextThreadPoolExecutor, traceable
@@ -142,6 +143,26 @@ _RESEARCHER_CAFE_INTENT_RE = re.compile(
     r"\b(?:cafe|café|coffee|pastelaria|pastry|padaria|bakery)\b",
     re.IGNORECASE,
 )
+
+# A visit with children (accent-folded text). The catalogue has no audience
+# field, so the search topic has to carry it and the answer says what the
+# results confirm.
+_CHILD_AUDIENCE_RE = re.compile(
+    r"\b(?:criancas?|filh[oa]s?|miudos?|bebes?|familias?|infantil|kids?|children|child|"
+    r"toddlers?|famil(?:y|ies))\b"
+)
+# Card text that shows a place caters for children (tickets or description).
+_CHILD_EVIDENCE_RE = re.compile(
+    r"\b(?:crianc\w*|infantil|famil\w*|child\w*|kids?|interativ\w*|interactiv\w*|hands-on)\b"
+)
+# Search subjects for an audience query, by place category (PT, EN).
+_AUDIENCE_SUBJECT_LABELS: Dict[str, Tuple[str, str]] = {
+    "Museums & Monuments": ("museus", "museums"),
+    "Parks & Gardens": ("parques e jardins", "parks and gardens"),
+    "View Points": ("miradouros", "viewpoints"),
+    "Beaches": ("praias", "beaches"),
+    "Shopping": ("lojas", "shops"),
+}
 
 # Four-letter stems of words that many place names share (museum, national,
 # palace, Lisbon, Portuguese, connectors); they do not show that a translated
@@ -373,9 +394,14 @@ class ResearcherAgent(BaseAgent):
         places, events, essential services, and Lisbon knowledge queries.
     """
 
-    def __init__(self):
-        """Initializes the researcher agent."""
-        super().__init__("researcher")
+    def __init__(self, connection: Optional[LLMConnection] = None):
+        """Initializes the researcher agent.
+
+        Args:
+            connection: Visitor endpoint for this session, or None for the
+                server provider.
+        """
+        super().__init__("researcher", connection)
         self.system_prompt = get_researcher_prompt()
         self._last_search_context: Optional[dict] = None
         self._pending_deterministic_replay: Optional[dict] = None
@@ -485,6 +511,10 @@ class ResearcherAgent(BaseAgent):
         lowered = value.lower()
         blocked = ("tradução", "translation", "não sei", "unknown", "official")
         if any(token in lowered for token in blocked):
+            return False
+        # A name is translated whole or kept as published: "Museu da Presidency
+        # of the Republic" still reads as English and mixes both languages.
+        if ResearcherAgent._place_title_needs_llm_localization(value):
             return False
         # A translation keeps a distinctive word of the name ("Decorative Arts" ->
         # "Artes Decorativas"); one that shares none names another place
@@ -925,6 +955,96 @@ class ResearcherAgent(BaseAgent):
             )
             and not explicit_dataset_or_service
         )
+
+    @classmethod
+    def _child_audience_place_query(
+        cls,
+        user_message: str,
+        category_hint: Optional[str],
+        nearby_location: Optional[str],
+        language: str,
+    ) -> str:
+        """Return the search topic of a place browse for a visit with children.
+
+        The whole sentence ranks by rating ("which museums do you recommend
+        ...") and loses the audience; a topic such as "museums for children and
+        families in Belém" ranks the places that match it.
+
+        Args:
+            user_message: The user's request.
+            category_hint: The single place category of the request, if any.
+            nearby_location: The reference place of a "near X" request, if any.
+            language: Output language code (``pt`` or ``en``).
+
+        Returns:
+            The search topic, or ``""`` when the request names no child
+            audience or is a restaurant search, whose own filters read the
+            whole sentence.
+        """
+        normalized = _normalize_researcher_intent_text(user_message)
+        if not _CHILD_AUDIENCE_RE.search(normalized) or category_hint == "Restaurants":
+            return ""
+        is_pt = language == "pt"
+        subject_pt, subject_en = _AUDIENCE_SUBJECT_LABELS.get(
+            category_hint or "", ("atividades e locais para visitar", "activities and places to visit")
+        )
+        if category_hint == "Museums & Monuments" and not re.search(r"\bmuse(?:u|um)s?\b", normalized):
+            subject_pt, subject_en = "monumentos", "monuments"
+        topic = f"{subject_pt} para crianças e famílias" if is_pt else f"{subject_en} for children and families"
+        if nearby_location:
+            return f"{topic} {'perto de' if is_pt else 'near'} {nearby_location}"
+        area = cls._extract_place_area_filter(user_message)
+        if area and cls._normalize_for_deterministic_routing(area) not in {"lisboa", "lisbon"}:
+            return f"{topic} {'em' if is_pt else 'in'} {area}"
+        return topic
+
+    @classmethod
+    def _append_child_audience_note(cls, result: str, user_message: str, language: str) -> str:
+        """State which results show details for children, since the catalogue has no audience field.
+
+        Args:
+            result: The rendered place cards.
+            user_message: The user's request.
+            language: Output language code (``pt`` or ``en``).
+
+        Returns:
+            The cards followed by the note, or the cards unchanged when the
+            request names no child audience or no card was found.
+        """
+        if not _CHILD_AUDIENCE_RE.search(_normalize_researcher_intent_text(user_message)):
+            return result
+        cards = cls._split_place_result_cards(result)
+        if not cards:
+            return result
+        with_details = [
+            cls._place_card_title(card)
+            for card in cards
+            if _CHILD_EVIDENCE_RE.search(_normalize_researcher_intent_text(" ".join(card[1:])))
+        ]
+        named = ", ".join(f"**{title}**" for title in with_details)
+        if language == "pt":
+            shown = (
+                f"Com bilhetes ou atividades para crianças e famílias indicados: {named}."
+                if with_details
+                else "Nenhum dos resultados mostra bilhetes ou atividades específicas para crianças."
+            )
+            note = (
+                "⚠️ **Limitação:** o VisitLisboa não classifica os locais por adequação a crianças; "
+                f"a lista dá prioridade aos que correspondem a uma pesquisa para crianças e famílias. {shown} "
+                "Confirma idades recomendadas e atividades com cada local."
+            )
+        else:
+            shown = (
+                f"Tickets or activities for children and families are shown for {named}."
+                if with_details
+                else "None of the results shows tickets or activities specific to children."
+            )
+            note = (
+                "⚠️ **Limitation:** VisitLisboa does not rate places by suitability for children; "
+                f"the list favours places that match a search for children and families. {shown} "
+                "Confirm recommended ages and activities with each venue."
+            )
+        return f"{result.rstrip()}\n\n{note}"
 
     @staticmethod
     def _append_diet_preference_caveat(result: str, user_message: str, language: str) -> str:
@@ -5922,6 +6042,11 @@ class ResearcherAgent(BaseAgent):
             max_results = 6
         elif self._is_visit_place_context_query(user_message) and place_focus_query and not category_hint and not zoo_lookup_subject:
             query_text = f"near {place_focus_query}"
+        audience_query = "" if specific_lookup or is_broad_attractions else self._child_audience_place_query(
+            user_message, category_hint, nearby_location, language
+        )
+        if audience_query:
+            query_text = audience_query
 
         args = {"query": query_text, "max_results": tool_max_results, "offset": 0, "language": language}
         if specific_lookup and not is_broad_attractions:
@@ -5980,6 +6105,7 @@ class ResearcherAgent(BaseAgent):
             user_message,
             language,
         )
+        result = self._append_child_audience_note(result, user_message, language)
         return f"{result}\n\n{source_line}".strip()
 
     @staticmethod

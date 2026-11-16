@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from agent.planning.legs import LegRequest
 
 from agent.agents.base import BaseAgent
+from agent.llm_factory import LLMConnection
 from agent.planning.brief import MONTH_NAMES_RE
 from agent.planning.legs import departure_times, door_to_door_minutes, localize_departure_notes
 from agent.prompts.transport import get_transport_prompt
@@ -8754,9 +8755,14 @@ class TransportAgent(BaseAgent):
         - Multi-modal routing with GPS-based stop finding
     """
 
-    def __init__(self):
-        """Initializes the transport agent."""
-        super().__init__("transport")
+    def __init__(self, connection: Optional[LLMConnection] = None):
+        """Initializes the transport agent.
+
+        Args:
+            connection: Visitor endpoint for this session, or None for the
+                server provider.
+        """
+        super().__init__("transport", connection)
         self.system_prompt = get_transport_prompt(language="en")
         self._system_prompt_dynamic = True
         self._last_transport_context: Optional[dict] = None

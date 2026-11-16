@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/Silvestre17/LISBOA_MultiAgentSystem"><img src="https://img.shields.io/badge/Project_Repository-GitHub-181717?style=for-the-badge&logo=github&logoColor=white" alt="LISBOA GitHub repository"></a>
-  <a href="https://andresilvestre17-lisboa.hf.space/"><img src="https://img.shields.io/badge/Hosted_App-Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white" alt="Open the hosted LISBOA app"></a>
+  <a href="https://silvestre17.github.io/LISBOA_MultiAgentSystem/"><img src="https://img.shields.io/badge/Hosted_App-Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white" alt="Open the hosted LISBOA app"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-2EA44F?style=for-the-badge" alt="MIT License"></a>
 </p>
 
@@ -64,7 +64,7 @@ The system combines specialized LLM agents with on-demand weather and transport 
 <a id="research-context"></a>
 ## 🎓 Research Context
 
-- **Thesis:** *LISBOA: A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon*
+- **Thesis:** *LISBOA: A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon*, RUN, [hdl:10362/207399](https://hdl.handle.net/10362/207399)
 - **Acronym:** *Lisbon Itinerary System Based On AI*
 - **Author:** André Filipe Gomes Silvestre
 - **Supervisors:** Prof. Dr. Bruno Jardim & Prof. Dr. Miguel de Castro Neto
@@ -214,7 +214,7 @@ python -m venv .venv
 source .venv/bin/activate
 
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r requirements_local_embeddings.txt
 ```
 
 Copy the environment template and fill in only the services you intend to use:
@@ -229,7 +229,7 @@ Copy-Item .env.example .env
 cp .env.example .env
 ```
 
-The committed default provider is Azure OpenAI. To use OpenAI or LM Studio instead, change `Config.MODEL_PROVIDER` in [`config.py`](./config.py) and set the matching variables in `.env`. Provider selection and credential inputs are disabled in the production interface.
+The committed default provider is Azure OpenAI. To use OpenAI or LM Studio instead, change `Config.MODEL_PROVIDER` in [`config.py`](./config.py) and set the matching variables in `.env`. Visitors can also use their own OpenAI-compatible endpoint, key and model for their browser session from **⚙️ System Settings** in the sidebar; see [Visitor Model Settings](./docs/05_DEPLOYMENT_AND_OPERATIONS.md#visitor-model-settings).
 
 Build or incrementally synchronize the vector store, then start the app:
 
@@ -312,7 +312,7 @@ Dockerfile          Container image for local and hosted deployment
 
 | Workflow | Trigger | Purpose |
 |---|---|---|
-| [`data_pipeline.yml`](./.github/workflows/data_pipeline.yml) | Daily at 04:00 UTC (places on Mondays) and manual runs | Refreshes the VisitLisboa events and places |
+| [`data_pipeline.yml`](./.github/workflows/data_pipeline.yml) | Daily at 04:00 UTC (places weekly, retried the next day after a failure) and manual runs | Refreshes the VisitLisboa events and places |
 | [`sync_vector_db.yml`](./.github/workflows/sync_vector_db.yml) | After a successful data refresh and manual runs | Synchronizes the ChromaDB collections incrementally and publishes them as a GitHub Release asset |
 | [`sync_transport_runtime_data.yml`](./.github/workflows/sync_transport_runtime_data.yml) | Daily at 03:25 UTC, relevant pushes to `main`, and manual runs | Publishes the Carris Urban and CP runtime assets |
 | [`deploy_huggingface_space.yml`](./.github/workflows/deploy_huggingface_space.yml) | Relevant pushes to `main`, completed vector or transport syncs, and manual runs | Deploys the Streamlit app to Hugging Face Spaces |
@@ -343,6 +343,20 @@ For research claims, cite the article:
   pages   = {113369},
   year    = {2026},
   doi     = {10.1016/j.rineng.2026.113369}
+}
+```
+
+For the thesis:
+
+> Silvestre, A. F. G. (2026). *LISBOA: A multi-agent approach for personalized tourism and urban mobility in Lisbon* [Master's thesis, NOVA Information Management School, Universidade NOVA de Lisboa]. RUN. https://hdl.handle.net/10362/207399
+
+```bibtex
+@mastersthesis{silvestre_2026_lisboa_thesis,
+  author = {Silvestre, André Filipe Gomes},
+  title  = {{LISBOA}: A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon},
+  school = {NOVA Information Management School, Universidade NOVA de Lisboa},
+  year   = {2026},
+  url    = {https://hdl.handle.net/10362/207399}
 }
 ```
 

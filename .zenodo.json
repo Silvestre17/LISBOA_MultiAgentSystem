@@ -1,7 +1,7 @@
 {
   "title": "LISBOA (Lisbon Itinerary System Based On AI): source code and evaluation artifacts",
   "upload_type": "software",
-  "description": "<p>LISBOA is a multi-agent assistant for context-aware tourism and urban mobility guidance in Lisbon. A supervisor routes each request to specialized worker agents (weather, transport, research), an optional itinerary planner, and a quality-assurance stage. The agents use 45 grounded tools connected to nine Lisbon data sources, combining retrieval-augmented generation, geospatial open-data retrieval, and live weather and transport integrations.</p><p>This record archives the source code, the evaluation corpus, and the evaluation results (worker benchmark, paired ablation, and statistics) reported in the article published in Results in Engineering (https://doi.org/10.1016/j.rineng.2026.113369) and in the MSc thesis at NOVA Information Management School (NOVA IMS), Universidade NOVA de Lisboa.</p>",
+  "description": "<p>LISBOA is a multi-agent assistant for context-aware tourism and urban mobility guidance in Lisbon. A supervisor routes each request to specialized worker agents (weather, transport, research), an optional itinerary planner, and a quality-assurance stage. The agents use 45 grounded tools connected to nine Lisbon data sources, combining retrieval-augmented generation, geospatial open-data retrieval, and live weather and transport integrations.</p><p>This record archives the source code, the evaluation corpus, and the evaluation results (worker benchmark, paired ablation, and statistics) reported in the article published in Results in Engineering (https://doi.org/10.1016/j.rineng.2026.113369) and in the MSc thesis (https://hdl.handle.net/10362/207399) at NOVA Information Management School (NOVA IMS), Universidade NOVA de Lisboa.</p>",
   "creators": [
     {
       "name": "Silvestre, André",
@@ -38,6 +38,12 @@
       "relation": "isSupplementTo",
       "resource_type": "publication-article",
       "scheme": "doi"
+    },
+    {
+      "identifier": "10362/207399",
+      "relation": "isSupplementTo",
+      "resource_type": "publication-thesis",
+      "scheme": "handle"
     }
   ]
 }

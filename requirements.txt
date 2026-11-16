@@ -32,14 +32,14 @@ langchain-openai==1.1.11      # OpenAI GPT models & Azure OpenAI Service
 langdetect==1.0.9             # ISO-639-1 language detection for non-PT/EN inputs
 
 # -----------------------------------------------------------------------------
-# Vector Store and Embeddings (RAG)
+# Vector Store (RAG)
 # -----------------------------------------------------------------------------
+# Query embeddings come from Cloudflare Workers AI on hosted deployments.
+# The local embedding model (torch, sentence-transformers) is in
+# requirements_local_embeddings.txt.
 langchain-chroma==1.1.0       # ChromaDB integration for LangChain
-langchain-huggingface==1.2.1  # HuggingFace embeddings
 langchain-community==0.4.1    # Community integrations
 chromadb==1.5.5               # Vector database
-sentence-transformers==5.2.3  # Embedding models
-transformers==5.3.0           # Backend required by sentence-transformers
 
 # OpenTelemetry (required by chromadb, pinned for compatibility)
 opentelemetry-api==1.40.0

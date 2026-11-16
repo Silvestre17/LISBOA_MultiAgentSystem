@@ -7,7 +7,7 @@ date-released: 2026-10-12
 doi: "10.5281/zenodo.23322220"
 license: MIT
 repository-code: "https://github.com/Silvestre17/LISBOA_MultiAgentSystem"
-url: "https://andresilvestre17-lisboa.hf.space/"
+url: "https://silvestre17.github.io/LISBOA_MultiAgentSystem/"
 authors:
   - family-names: Silvestre
     given-names: André
@@ -44,3 +44,14 @@ preferred-citation:
   year: 2026
   start: 113369
   doi: "10.1016/j.rineng.2026.113369"
+references:
+  - type: thesis
+    title: "LISBOA: A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon"
+    authors:
+      - family-names: Silvestre
+        given-names: André Filipe Gomes
+    thesis-type: "Master's thesis"
+    institution:
+      name: "NOVA Information Management School (NOVA IMS), Universidade NOVA de Lisboa"
+    year: 2026
+    url: "https://hdl.handle.net/10362/207399"

@@ -10,6 +10,8 @@
 #     - LMStudio: Local server with OpenAI-compatible API (open-source models)
 #     - OpenAI:   OpenAI API (GPT models)
 #     - Azure:    Azure OpenAI Service (enterprise cloud)
+#     - Visitor connection: any OpenAI-compatible endpoint supplied in the
+#       Streamlit sidebar for one browser session (LLMConnection)
 #
 #   Design Pattern: Factory Pattern
 #     - Encapsulates object creation logic
@@ -25,9 +27,17 @@
 # Required libraries:
 # pip install langchain-core langchain-openai
 
+import hashlib
+import ipaddress
 import re
-from typing import Any, Dict, Optional
+import socket
+import threading
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
 
+import httpcore
+import httpx
 from langchain_core.language_models.chat_models import BaseChatModel
 
 try:
@@ -37,6 +47,234 @@ except ModuleNotFoundError:
     import sys
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
     from config import Config
+
+
+# Hosts treated as a local runtime: agents run sequentially and system
+# messages are merged, as for the LM Studio provider.
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+
+# Placeholder sent when a local server needs no key. An explicit value stops
+# the OpenAI client from falling back to the server's OPENAI_API_KEY.
+_NO_API_KEY = "not-needed"
+
+
+def _azure_v1_base_url(endpoint: str) -> str:
+    """Return the Azure OpenAI v1 base URL for a resource endpoint.
+
+    Args:
+        endpoint: Resource endpoint, with or without ``/openai`` or ``/openai/v1``.
+
+    Returns:
+        str: Base URL ending in ``/openai/v1/``.
+    """
+    endpoint = endpoint.rstrip("/")
+    endpoint_lower = endpoint.lower()
+    if endpoint_lower.endswith("/openai/v1"):
+        return f"{endpoint}/"
+    if endpoint_lower.endswith("/openai"):
+        return f"{endpoint}/v1/"
+    return f"{endpoint}/openai/v1/"
+
+
+def _resolve_public_addresses(host: str) -> List[str]:
+    """Resolve a host and require every address to be public.
+
+    IP literals resolve to themselves, so loopback, private, link-local,
+    reserved and multicast literals are refused as well as names that point
+    to them.
+
+    Args:
+        host: Host name or IP literal from the visitor's base URL.
+
+    Returns:
+        List[str]: The resolved addresses, in resolver order.
+
+    Raises:
+        ValueError: ``private_host`` for a non-public address, or
+            ``connection`` when the host does not resolve.
+    """
+    try:
+        address_infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except (OSError, UnicodeError):
+        raise ValueError("connection") from None
+    addresses: List[str] = []
+    for address_info in address_infos:
+        literal = address_info[4][0].split("%", 1)[0]
+        address = ipaddress.ip_address(literal)
+        if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+            address = address.ipv4_mapped
+        if not address.is_global or address.is_multicast or address.is_reserved:
+            raise ValueError("private_host")
+        if literal not in addresses:
+            addresses.append(literal)
+    return addresses
+
+
+class _PublicAddressBackend(httpcore.NetworkBackend):
+    """Network backend that opens connections to public addresses only.
+
+    The host is resolved again for every new connection and the socket goes
+    to one of the addresses just checked, so a DNS answer that changes after
+    the settings form validated it (DNS rebinding) cannot reach a private
+    address. TLS still verifies the certificate for the original host name.
+    """
+
+    def __init__(self) -> None:
+        self._backend = httpcore.SyncBackend()
+
+    def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+        """Connect to the first reachable public address of ``host``."""
+        try:
+            addresses = _resolve_public_addresses(host)
+        except ValueError as exc:
+            raise httpcore.ConnectError(str(exc)) from None
+        last_error: Exception = httpcore.ConnectError("connection")
+        for address in addresses:
+            try:
+                return self._backend.connect_tcp(
+                    address,
+                    port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as exc:
+                last_error = exc
+        raise last_error
+
+    def connect_unix_socket(self, path, timeout=None, socket_options=None):
+        """Refuse Unix sockets: visitor endpoints are network hosts."""
+        raise httpcore.ConnectError("private_host")
+
+    def sleep(self, seconds: float) -> None:
+        """Delegate retry back-off sleeps to the standard backend."""
+        self._backend.sleep(seconds)
+
+
+class _PublicAddressTransport(httpx.HTTPTransport):
+    """httpx transport whose connections go through ``_PublicAddressBackend``.
+
+    httpx does not expose the network backend, so the connection pool built
+    by ``HTTPTransport`` is replaced; any other layout fails closed.
+    """
+
+    def __init__(self) -> None:
+        limits = httpx.Limits(max_connections=100, max_keepalive_connections=20)
+        super().__init__(trust_env=False, limits=limits)
+        if not isinstance(self._pool, httpcore.ConnectionPool):
+            raise RuntimeError("Unexpected httpx transport layout; visitor connections are disabled.")
+        self._pool.close()
+        self._pool = httpcore.ConnectionPool(
+            ssl_context=httpx.create_ssl_context(trust_env=False),
+            max_connections=limits.max_connections,
+            max_keepalive_connections=limits.max_keepalive_connections,
+            keepalive_expiry=limits.keepalive_expiry,
+            network_backend=_PublicAddressBackend(),
+        )
+
+
+class _RefusingAsyncTransport(httpx.AsyncBaseTransport):
+    """Async transport that refuses every request.
+
+    The agents call models synchronously. Without this, an async call would
+    use the OpenAI default client, which follows redirects and skips the
+    address checks.
+    """
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        """Refuse the request."""
+        raise httpx.ConnectError("Asynchronous visitor model calls are disabled.", request=request)
+
+
+_VISITOR_HTTP_CLIENTS: Optional[tuple[httpx.Client, httpx.AsyncClient]] = None
+_VISITOR_HTTP_CLIENTS_LOCK = threading.Lock()
+
+
+def _visitor_http_clients() -> tuple[httpx.Client, httpx.AsyncClient]:
+    """Return the shared HTTP clients for visitor endpoints on hosted deployments.
+
+    They never follow redirects and ignore proxy environment variables, so a
+    visitor endpoint cannot bounce the server to an internal address. The
+    keys travel in per-request headers, so sharing the pool is safe.
+    """
+    global _VISITOR_HTTP_CLIENTS
+    with _VISITOR_HTTP_CLIENTS_LOCK:
+        if _VISITOR_HTTP_CLIENTS is None:
+            _VISITOR_HTTP_CLIENTS = (
+                httpx.Client(transport=_PublicAddressTransport(), follow_redirects=False, trust_env=False),
+                httpx.AsyncClient(transport=_RefusingAsyncTransport(), follow_redirects=False, trust_env=False),
+            )
+        return _VISITOR_HTTP_CLIENTS
+
+
+@dataclass(frozen=True)
+class LLMConnection:
+    """OpenAI-compatible endpoint that a visitor supplies for one session.
+
+    The key lives only in this object, which the app keeps in the visitor's
+    ``st.session_state``. It is passed straight to the chat-model client and is
+    never written to the environment, ``Config``, files or logs. ``repr`` hides it.
+
+    Attributes:
+        base_url: Endpoint base URL, for example ``https://api.openai.com/v1``.
+        model: Model or deployment name sent with every request.
+        api_key: Visitor's key; empty for local servers that need none.
+    """
+
+    base_url: str
+    model: str
+    api_key: str = field(default="", repr=False)
+
+    @classmethod
+    def create(cls, base_url: str, model: str, api_key: str = "") -> "LLMConnection":
+        """Validate and normalize visitor input into a connection.
+
+        Azure resource endpoints are completed to their ``/openai/v1/`` path.
+        Unless ``Config.ALLOW_PRIVATE_LLM_HOSTS`` is set, the host must resolve
+        only to public addresses.
+
+        Args:
+            base_url: Base URL typed by the visitor.
+            model: Model name typed by the visitor.
+            api_key: Key typed by the visitor.
+
+        Returns:
+            LLMConnection: Normalized connection.
+
+        Raises:
+            ValueError: ``invalid_base_url``, ``missing_model``, ``private_host``
+                or ``connection``; the message is a reason code that never
+                contains the input values.
+        """
+        base_url = (base_url or "").strip()
+        model = (model or "").strip()
+        try:
+            parts = urlsplit(base_url)
+        except ValueError:
+            raise ValueError("invalid_base_url") from None
+        if parts.scheme not in {"http", "https"} or not parts.hostname:
+            raise ValueError("invalid_base_url")
+        if not model:
+            raise ValueError("missing_model")
+        if not Config.ALLOW_PRIVATE_LLM_HOSTS:
+            _resolve_public_addresses(parts.hostname)
+        if parts.hostname.endswith(".azure.com") and "/v1" not in parts.path:
+            base_url = _azure_v1_base_url(base_url)
+        return cls(base_url=base_url, model=model, api_key=(api_key or "").strip())
+
+    @property
+    def provider(self) -> str:
+        """Provider label for agents and usage logs: ``local`` or ``compatible``."""
+        host = (urlsplit(self.base_url).hostname or "").lower()
+        is_local = host in _LOOPBACK_HOSTS or host.endswith(".localhost")
+        return "local" if is_local else "compatible"
+
+    @property
+    def fingerprint(self) -> str:
+        """Non-reversible identifier of the endpoint, model and key."""
+        key_hash = hashlib.sha256(self.api_key.encode("utf-8")).hexdigest()
+        material = "\n".join((self.base_url, self.model, key_hash))
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
 
 
 class LLMFactory:
@@ -240,14 +478,7 @@ class LLMFactory:
 
             # Build the v1 API base URL
             # Format: https://YOUR-RESOURCE.openai.azure.com/openai/v1/
-            endpoint = Config.AZURE_OPENAI_ENDPOINT.rstrip("/")
-            endpoint_lower = endpoint.lower()
-            if endpoint_lower.endswith("/openai/v1"):
-                base_url = f"{endpoint}/"
-            elif endpoint_lower.endswith("/openai"):
-                base_url = f"{endpoint}/v1/"
-            else:
-                base_url = f"{endpoint}/openai/v1/"
+            base_url = _azure_v1_base_url(Config.AZURE_OPENAI_ENDPOINT)
 
             # Check if it's a reasoning-style deployment using helper function
             if LLMFactory._is_reasoning_model(model_name):
@@ -288,6 +519,66 @@ class LLMFactory:
                 f"   Supported providers: lmstudio, openai, azure\n"
                 f"   Default provider: {Config.MODEL_PROVIDER}"
             )
+
+    @staticmethod
+    def server_provider_configured() -> bool:
+        """Return whether the server provider in ``config.py`` has its credentials.
+
+        LM Studio needs no key, so it counts as configured; its server is only
+        checked by the first request.
+
+        Returns:
+            bool: True when the server default provider can be built.
+        """
+        provider = Config.MODEL_PROVIDER.lower().strip()
+        if provider == "azure":
+            return bool(Config.AZURE_OPENAI_API_KEY and Config.AZURE_OPENAI_ENDPOINT)
+        if provider == "openai":
+            return bool(Config.OPENAI_API_KEY)
+        return provider == "lmstudio"
+
+    @staticmethod
+    def get_connection_llm(
+        connection: LLMConnection,
+        temperature: float = Config.TEMPERATURE,
+        timeout: float = 180,
+        max_retries: int = 2,
+    ) -> BaseChatModel:
+        """Create a chat model for a visitor's OpenAI-compatible endpoint.
+
+        The key is always passed explicitly, so the OpenAI client never falls
+        back to server environment variables such as ``OPENAI_API_KEY``.
+        Unless ``Config.ALLOW_PRIVATE_LLM_HOSTS`` is set, requests go through
+        clients that re-check the host at every connection and never follow
+        redirects.
+
+        Args:
+            connection: Visitor endpoint, model and key for this session.
+            temperature: Sampling temperature; omitted for reasoning models.
+            timeout: Request timeout in seconds.
+            max_retries: Client retries for transient failures.
+
+        Returns:
+            BaseChatModel: Configured chat model.
+        """
+        from langchain_openai import ChatOpenAI
+
+        params: Dict[str, Any] = {
+            "model": connection.model,
+            "base_url": connection.base_url,
+            "api_key": connection.api_key or _NO_API_KEY,
+            "streaming": True,
+            "stream_usage": True,
+            "timeout": timeout,
+            "max_retries": max_retries,
+        }
+        # Reasoning effort stays at the provider default: accepted values differ
+        # between models and providers, and a rejected value would fail every call.
+        if not LLMFactory._is_reasoning_model(connection.model):
+            params["temperature"] = temperature
+        if not Config.ALLOW_PRIVATE_LLM_HOSTS:
+            params["http_client"], params["http_async_client"] = _visitor_http_clients()
+        return ChatOpenAI(**params)
 
     @staticmethod
     def get_model_info(llm: BaseChatModel) -> Dict[str, Any]:
@@ -436,7 +727,10 @@ class LLMFactory:
         }
 
     @staticmethod
-    def get_agent_llm(agent_name: str) -> BaseChatModel:
+    def get_agent_llm(
+        agent_name: str,
+        connection: Optional[LLMConnection] = None,
+    ) -> BaseChatModel:
         """
         Creates an LLM instance configured for a specific agent.
 
@@ -446,6 +740,8 @@ class LLMFactory:
         Args:
             agent_name (str): Name of the agent (e.g., 'supervisor', 'weather',
                             'transport', 'researcher', 'planner').
+            connection: Visitor endpoint for this session. When set, every
+                agent uses its model, and the server provider is not touched.
 
         Returns:
             BaseChatModel: Configured LLM for the specified agent.
@@ -454,6 +750,13 @@ class LLMFactory:
             >>> llm = LLMFactory.get_agent_llm("supervisor")
             >>> # Returns LLM configured with supervisor's provider/model
         """
+        if connection is not None:
+            # Visitor endpoints reuse the direct-OpenAI per-agent temperatures.
+            temperature = Config.AGENT_MODELS_OPENAI.get(agent_name, {}).get(
+                "temperature", Config.TEMPERATURE
+            )
+            return LLMFactory.get_connection_llm(connection, temperature=temperature)
+
         # Get agent-specific config or fallback to default
         agent_config = Config.AGENT_MODELS().get(
             agent_name, Config.DEFAULT_AGENT_MODEL()

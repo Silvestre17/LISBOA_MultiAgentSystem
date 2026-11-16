@@ -7,9 +7,9 @@
 #
 # Installation: pip install -r requirements_all.txt
 #
-# This file extends requirements.txt with local-only extras needed for
-# scraping, tests, evaluation, and notebooks. It is intentionally separate
-# from the production Streamlit runtime used on Community Cloud.
+# This file extends requirements_local_embeddings.txt with local-only extras
+# needed for scraping, tests, evaluation, and notebooks. It is intentionally
+# separate from the production Streamlit runtime used on Community Cloud.
 #
 # IMPORTANT:
 #   PyTorch is intentionally NOT pinned here. Install it explicitly with the
@@ -17,7 +17,7 @@
 #   setup in this repository, use environment_local_gpu.yml.
 # ==========================================================================
 
--r requirements.txt
+-r requirements_local_embeddings.txt
 
 # -----------------------------------------------------------------------------
 # Web Scraping Extras
