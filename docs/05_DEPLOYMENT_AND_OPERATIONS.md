@@ -292,7 +292,7 @@ The analysis notebook `eval/benchmark_ablation_analysis.ipynb` also exports the 
 | Workflow | Trigger | Purpose | Main Output |
 |---|---|---|---|
 | `data_pipeline.yml` | Daily at **04:00 UTC**; manual runs with `events`, `places`, or `both` | Scrape VisitLisboa events daily and places weekly (7+ days after the last successful run, so a failure is retried the next day); each dataset is committed as soon as it is scraped | JSON artifacts committed under `data_collection/webscraping/` |
-| `sync_vector_db.yml` | After a successful `Update Lisbon Data` run; manual runs | Incremental ChromaDB sync in bounded batches | `vector_db.zip` (complete) or `vector_db_staging.zip` (in progress) on the `vector-db-latest` release |
+| `sync_vector_db.yml` | After each `Update Lisbon Data` run that committed new data, also when a later scrape failed; manual runs | Incremental ChromaDB sync in bounded batches | `vector_db.zip` (complete) or `vector_db_staging.zip` (in progress) on the `vector-db-latest` release |
 | `sync_transport_runtime_data.yml` | Daily at **03:25 UTC**; pushes that change the transport release code; manual runs | Refresh the Carris Urban and CP runtime assets | Fixed-name ZIP files and a manifest on the `transport-data-latest` release |
 | `deploy_huggingface_space.yml` | Pushes to `main` that change the app; completed vector or transport syncs; manual runs | Deploy the app (until 2026-12-01) | Updated Hugging Face Space |
 

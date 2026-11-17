@@ -84,8 +84,10 @@ env:
 
 jobs:
   sync-vector-db:
-    # Only run if previous workflow succeeded (or manual trigger)
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    # A failed pipeline run may still have committed one dataset (Events before a
+    # failed Places scrape), so failures are synced too; the change check below
+    # skips the work when nothing was committed.
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(fromJSON('["success", "failure"]'), github.event.workflow_run.conclusion) }}
 
     runs-on: ubuntu-latest
     timeout-minutes: 360 # GitHub-hosted runner hard limit is 6 hours per job
@@ -220,10 +222,18 @@ jobs:
 
       - name: Check if JSON files changed
         id: check-changes
+        env:
+          # The pipeline commits Events and Places separately, so compare against
+          # the commit it started from, not HEAD~1.
+          PIPELINE_BASE_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
-            EVENTS_CHANGED=$(git diff --name-only HEAD~1 HEAD -- 'data_collection/webscraping/events.json' | wc -l)
-            PLACES_CHANGED=$(git diff --name-only HEAD~1 HEAD -- 'data_collection/webscraping/places.json' | wc -l)
+          BASE="HEAD~1"
+          if [ -n "$PIPELINE_BASE_SHA" ] && git cat-file -e "$PIPELINE_BASE_SHA^{commit}" 2>/dev/null; then
+            BASE="$PIPELINE_BASE_SHA"
+          fi
+          if git rev-parse --verify "$BASE" >/dev/null 2>&1; then
+            EVENTS_CHANGED=$(git diff --name-only "$BASE" HEAD -- 'data_collection/webscraping/events.json' | wc -l)
+            PLACES_CHANGED=$(git diff --name-only "$BASE" HEAD -- 'data_collection/webscraping/places.json' | wc -l)
           else
             EVENTS_CHANGED=1
             PLACES_CHANGED=1

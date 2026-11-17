@@ -313,7 +313,7 @@ Dockerfile          Container image for local and hosted deployment
 | Workflow | Trigger | Purpose |
 |---|---|---|
 | [`data_pipeline.yml`](./.github/workflows/data_pipeline.yml) | Daily at 04:00 UTC (places weekly, retried the next day after a failure) and manual runs | Refreshes the VisitLisboa events and places |
-| [`sync_vector_db.yml`](./.github/workflows/sync_vector_db.yml) | After a successful data refresh and manual runs | Synchronizes the ChromaDB collections incrementally and publishes them as a GitHub Release asset |
+| [`sync_vector_db.yml`](./.github/workflows/sync_vector_db.yml) | After each data refresh that committed new data (also when a later scrape failed) and manual runs | Synchronizes the ChromaDB collections incrementally and publishes them as a GitHub Release asset |
 | [`sync_transport_runtime_data.yml`](./.github/workflows/sync_transport_runtime_data.yml) | Daily at 03:25 UTC, relevant pushes to `main`, and manual runs | Publishes the Carris Urban and CP runtime assets |
 | [`deploy_huggingface_space.yml`](./.github/workflows/deploy_huggingface_space.yml) | Relevant pushes to `main`, completed vector or transport syncs, and manual runs | Deploys the Streamlit app to Hugging Face Spaces |
 
